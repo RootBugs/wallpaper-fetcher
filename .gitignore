@@ -1,0 +1,34 @@
+# ============ SECRETS - kabhi push nahi karna ============
+# Pinterest official-API token (app isme access_token cache karta hai)
+pinterest.json
+pin_session.json
+*.cookies.json
+
+# Playwright/Chrome browser profile - isme saved passwords + Pinterest
+# session cookies hote hain (Login Data, Network/Cookies, Trust Tokens)
+.pin_profile/
+
+# ============ python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ============ runtime logs ============
+server.log
+server.err
+nature-7000-chain.log
+nature-7000-chain.out
+nature-7000-chain.err
+*.log
+*.out
+*.err
+
+# ============ OS / editor ============
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
