@@ -1446,264 +1446,576 @@ def run_job(job):
 app = Flask(__name__)
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wallpaper Fetcher</title>
 <style>
- :root{--bg:#111417;--card:#1a1f24;--acc:#ffd84d;--txt:#e8eaed;--mut:#8b939c}
- *{box-sizing:border-box}
- body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 system-ui,Segoe UI,sans-serif}
- .wrap{max-width:1180px;margin:0 auto;padding:26px 18px 60px}
- h1{font-size:26px;margin:0 0 4px} h1 span{color:var(--acc)}
- .sub{color:var(--mut);margin-bottom:22px}
- .card{background:var(--card);border:1px solid #262c33;border-radius:14px;padding:18px;margin-bottom:16px}
- label{display:block;font-size:12px;letter-spacing:.4px;text-transform:uppercase;color:var(--mut);margin:0 0 6px}
- input[type=text],select,textarea{width:100%;background:#0e1114;border:1px solid #2c333a;color:var(--txt);
-   padding:11px 12px;border-radius:9px;font-size:15px}
- textarea{height:74px;resize:vertical}
- .row{display:flex;gap:14px;flex-wrap:wrap} .row>div{flex:1;min-width:170px}
- .swatches{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
- .sw{border:2px solid #2c333a;background:#0e1114;color:var(--txt);border-radius:9px;padding:7px 12px;
-   cursor:pointer;font-size:14px;display:flex;align-items:center;gap:7px}
- .sw i{width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid #00000055}
- .sw.on{border-color:var(--acc);background:#23261c}
- .checks{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;color:var(--mut)}
- .checks label{text-transform:none;font-size:14px;color:var(--txt);display:flex;gap:7px;align-items:center;margin:0}
- button.go{background:var(--acc);border:0;color:#171300;font-weight:700;font-size:16px;padding:13px 26px;
-   border-radius:10px;cursor:pointer;margin-top:16px}
- button:disabled{opacity:.45;cursor:not-allowed}
- button.ghost{background:#2a3138;color:var(--txt);font-weight:600;padding:9px 16px;font-size:14px;margin:0}
- .bar{height:9px;background:#0e1114;border-radius:6px;overflow:hidden;margin:10px 0}
- .bar i{display:block;height:100%;background:linear-gradient(90deg,#ffd84d,#ff9d3d);width:0;transition:width .4s}
- .phase{font-size:13px;color:var(--acc);text-transform:capitalize}
- #log{font:12.5px/1.7 Consolas,monospace;color:#9aa4ad;background:#0e1114;border-radius:9px;
-   padding:10px 12px;height:150px;overflow:auto;white-space:pre-wrap}
- .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
- .t{background:#0e1114;border:1px solid #262c33;border-radius:10px;overflow:hidden}
- .t img{width:100%;height:120px;object-fit:cover;display:block;background:#000}
- .t .m{padding:7px 9px;font-size:11.5px;color:var(--mut)}
- .t .m b{color:var(--txt);display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .badge{display:inline-block;background:#232b33;border:1px solid #333d47;border-radius:5px;
-   padding:0 5px;font-size:10.5px;color:#9ecbff;margin-right:4px}
- .stats{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--mut);margin-top:6px}
- .stats b{color:var(--acc)}
- .folder{font:13px Consolas,monospace;color:#9ee493;word-break:break-all;margin-top:8px}
- .hidden{display:none}
- footer{color:var(--mut);font-size:13px;border-top:1px solid #262c33;padding-top:14px;margin-top:26px}
- footer a{color:#9ecbff}
-</style></head><body><div class="wrap">
-<h1>🖼️ Wallpaper <span>Fetcher</span></h1>
-<div class="sub">Keywords + colour daalo &rarr; open/free APIs se fetch &rarr; nayi folder me save (+ manifest.csv)</div>
+:root{
+  --bg:#0a0c0f; --card:#13171d; --card2:#181d24; --in:#0d1014;
+  --line:#222932; --line2:#2b333d;
+  --txt:#e7eaef; --txt2:#a8b1bd; --mut:#7b8593;
+  --acc:#ffd84d; --acc2:#ffb020; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;
+  background:
+    radial-gradient(1100px 520px at 85% -8%, rgba(255,216,77,.08), transparent 62%),
+    radial-gradient(820px 460px at -8% 12%, rgba(77,159,255,.055), transparent 62%),
+    var(--bg);
+  color:var(--txt);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased}
+code{font-family:Consolas,'Cascadia Code',monospace;font-size:.9em;background:#20262e;padding:1px 5px;border-radius:5px}
 
-<div class="card">
-  <label>Keywords (comma ya naye line se alag)</label>
-  <textarea id="kw" placeholder="sunflower field, minimal pattern, ocean waves"></textarea>
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);
+  background:rgba(10,12,15,.82);border-bottom:1px solid var(--line)}
+.topbar .in{max-width:1480px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:14px}
+.logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:17px;
+  background:linear-gradient(140deg,var(--acc),var(--acc2));box-shadow:0 4px 16px rgba(255,216,77,.22)}
+.brand{font-size:16.5px;font-weight:650;letter-spacing:-.2px}
+.brand span{color:var(--acc)}
+.pill{font-size:11.5px;color:var(--txt2);background:var(--card2);border:1px solid var(--line);
+  padding:4px 10px;border-radius:99px;white-space:nowrap}
+.spacer{flex:1}
+.ghost{background:var(--card2);border:1px solid var(--line2);color:var(--txt);font-weight:550;
+  padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13.5px;transition:.14s;font-family:inherit}
+.ghost:hover{background:#222932;border-color:#39424e}
+.ghost.sm{padding:5px 11px;font-size:12.5px}
 
-  <label style="margin-top:16px">Colour</label>
-  <div class="swatches" id="swatches">
-    <button class="sw on" data-c="any"><i style="background:linear-gradient(135deg,#ff5f6d,#ffc371,#7ee8fa,#a78bfa)"></i>Any</button>
-    <button class="sw" data-c="yellow"><i style="background:#ffd84d"></i>Yellow</button>
-    <button class="sw" data-c="gold"><i style="background:#e0a527"></i>Gold</button>
-    <button class="sw" data-c="orange"><i style="background:#ff8c1a"></i>Orange</button>
-    <button class="sw" data-c="red"><i style="background:#e5484d"></i>Red</button>
-    <button class="sw" data-c="pink"><i style="background:#ff7ab6"></i>Pink</button>
-    <button class="sw" data-c="purple"><i style="background:#a78bfa"></i>Purple</button>
-    <button class="sw" data-c="blue"><i style="background:#4d9fff"></i>Blue</button>
-    <button class="sw" data-c="teal"><i style="background:#2ec4b6"></i>Teal</button>
-    <button class="sw" data-c="green"><i style="background:#4caf50"></i>Green</button>
-    <button class="sw" data-c="white"><i style="background:#f5f5f0"></i>White</button>
-    <button class="sw" data-c="grey"><i style="background:#9aa0a6"></i>Grey</button>
-    <button class="sw" data-c="black"><i style="background:#242424"></i>Black</button>
+/* ---------- layout ---------- */
+.layout{max-width:1480px;margin:0 auto;padding:20px 22px 60px;
+  display:grid;grid-template-columns:392px minmax(0,1fr);gap:18px;align-items:start}
+@media(max-width:1040px){.layout{grid-template-columns:1fr}}
+
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r)}
+.ctrl{position:sticky;top:66px;padding:18px;max-height:calc(100vh - 88px);overflow:auto}
+.ctrl::-webkit-scrollbar,.log::-webkit-scrollbar,.stageScroll::-webkit-scrollbar{width:9px;height:9px}
+.ctrl::-webkit-scrollbar-thumb,.log::-webkit-scrollbar-thumb,.stageScroll::-webkit-scrollbar-thumb{background:#2b333d;border-radius:9px}
+.stage{padding:0;overflow:hidden}
+
+h2{font-size:11px;letter-spacing:.9px;text-transform:uppercase;color:var(--mut);margin:0 0 8px;font-weight:600}
+.grp{margin-bottom:17px}
+.grp:last-child{margin-bottom:0}
+
+textarea,input[type=text],input[type=password],select{
+  width:100%;background:var(--in);border:1px solid var(--line2);color:var(--txt);
+  padding:10px 12px;border-radius:10px;font-size:14.5px;font-family:inherit;transition:.14s}
+textarea{min-height:76px;resize:vertical;line-height:1.5}
+select{cursor:pointer;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,#6d7683 50%),linear-gradient(135deg,#6d7683 50%,transparent 50%);
+  background-position:calc(100% - 17px) 18px,calc(100% - 12px) 18px;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+textarea:focus,input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(255,216,77,.13)}
+textarea::placeholder,input::placeholder{color:#5d6674}
+.hint{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.45}
+.hint b{color:var(--txt2);font-weight:600}
+
+/* colour dots */
+.dots{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.dot{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.14);cursor:pointer;
+  padding:0;position:relative;transition:.14s;flex:none}
+.dot:hover{transform:scale(1.14)}
+.dot.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,216,77,.35);transform:scale(1.14)}
+.dotName{font-size:13px;color:var(--txt2);margin-left:5px;min-width:52px}
+
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--txt2);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer;margin:0}
+
+.go{width:100%;margin-top:19px;background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#171300;
+  font-weight:750;font-size:15.5px;padding:14px;border-radius:11px;cursor:pointer;font-family:inherit;
+  box-shadow:0 6px 22px rgba(255,216,77,.2);transition:.15s;letter-spacing:.2px}
+.go:hover{transform:translateY(-1px);box-shadow:0 9px 28px rgba(255,216,77,.3)}
+.go:active{transform:translateY(0)}
+.go:disabled{opacity:.42;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* ---------- progress head ---------- */
+.phead{padding:17px 18px 15px;border-bottom:1px solid var(--line);background:var(--card2)}
+.steps{display:flex;gap:5px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.step{font-size:12px;color:var(--mut);background:var(--in);border:1px solid var(--line);
+  padding:4px 11px;border-radius:99px;display:flex;align-items:center;gap:6px;transition:.2s}
+.step i{width:6px;height:6px;border-radius:50%;background:#3d4653;display:block;transition:.2s}
+.step.on{color:#171300;background:var(--acc);border-color:var(--acc);font-weight:650}
+.step.on i{background:#171300}
+.step.done{color:var(--ok);border-color:#285c3d;background:#12241a}
+.step.done i{background:var(--ok)}
+.arrow{color:#3d4653;font-size:12px}
+
+.bar{height:7px;background:var(--in);border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+.bar i{display:block;height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .5s ease}
+.bar i.ok{background:linear-gradient(90deg,#34d399,#4ade80)}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:13px}
+@media(max-width:620px){.stats{grid-template-columns:repeat(2,1fr)}}
+.st{background:var(--in);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.st u{display:block;font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--mut);
+  text-decoration:none;margin-bottom:2px}
+.st b{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.st b.hl{color:var(--acc)}
+.path{margin-top:11px;font:12px Consolas,'Cascadia Code',monospace;color:var(--ok);
+  word-break:break-all;display:flex;align-items:center;gap:8px}
+.path span{flex:1;min-width:0}
+
+/* ---------- log ---------- */
+.logwrap{border-top:1px solid var(--line);padding:12px 18px 15px;background:var(--card)}
+.logHead{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.logHead h2{margin:0;flex:1}
+.log{font:11.8px/1.65 Consolas,'Cascadia Code',monospace;color:#94a0ad;background:var(--in);
+  border:1px solid var(--line);border-radius:9px;padding:9px 11px;height:132px;overflow:auto;
+  white-space:pre-wrap;word-break:break-word}
+.log:empty:after{content:"yahan live progress aayega…";color:#4d5663}
+.log div{padding:0}
+.log .err{color:var(--err)}
+.log .ok{color:var(--ok)}
+
+/* ---------- results ---------- */
+.rhead{display:flex;align-items:center;gap:11px;padding:15px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rhead b{font-size:15px}
+.rhead .cnt{font-size:12.5px;color:var(--acc);font-weight:600;background:rgba(255,216,77,.1);
+  border:1px solid rgba(255,216,77,.22);padding:2px 9px;border-radius:99px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:11px;padding:16px 18px}
+@media(max-width:620px){.grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}}
+.t{position:relative;background:#000;border:1px solid var(--line);border-radius:11px;overflow:hidden;
+  cursor:pointer;aspect-ratio:16/10;transition:.16s;display:block}
+.t img{width:100%;height:100%;object-fit:cover;display:block;transition:.25s}
+.t:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.5)}
+.t:hover img{transform:scale(1.05)}
+.t .ov{position:absolute;inset:auto 0 0 0;padding:22px 9px 8px;
+  background:linear-gradient(transparent,rgba(0,0,0,.9));opacity:0;transition:.16s}
+.t:hover .ov{opacity:1}
+.t .ov b{display:block;font-size:11.5px;color:#fff;font-weight:600;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.t .ov em{font-style:normal;font-size:10.5px;color:#b9c2cd}
+.badge{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.72);backdrop-filter:blur(6px);
+  border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:1px 6px;font-size:10px;
+  color:#cfe0f5;font-weight:600;letter-spacing:.2px}
+.rfoot{padding:0 18px 16px;display:flex;justify-content:center}
+.empty{padding:46px 18px;text-align:center;color:var(--mut)}
+.empty .ic{font-size:34px;margin-bottom:9px;opacity:.7}
+
+/* ---------- details / footer ---------- */
+details{border-top:1px solid var(--line)}
+details summary{padding:12px 18px;cursor:pointer;font-size:13.5px;color:var(--txt2);list-style:none;
+  display:flex;align-items:center;gap:8px;user-select:none}
+details summary::-webkit-details-marker{display:none}
+details summary:hover{color:var(--txt)}
+details summary:before{content:"▸";color:var(--mut);font-size:11px;transition:.15s;display:inline-block}
+details[open] summary:before{transform:rotate(90deg)}
+.dbody{padding:0 18px 16px;font-size:13px;color:var(--txt2);line-height:1.65}
+.dbody p{margin:0 0 9px}.dbody p:last-child{margin:0}
+.dbody .note{color:var(--warn)}
+.dbody a{color:#9ecbff}
+
+footer{max-width:1480px;margin:0 auto;padding:0 22px 40px;color:var(--mut);font-size:12.5px}
+footer .fin{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:4px 0}
+footer a{color:#9ecbff;text-decoration:none}
+footer a:hover{text-decoration:underline}
+
+/* ---------- toast ---------- */
+#toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,140%);z-index:90;
+  background:#1b2028;border:1px solid var(--line2);color:var(--txt);padding:11px 18px;border-radius:11px;
+  font-size:13.5px;box-shadow:0 14px 40px rgba(0,0,0,.55);transition:transform .28s cubic-bezier(.2,.9,.3,1.4);
+  max-width:min(560px,92vw)}
+#toast.show{transform:translate(-50%,0)}
+#toast.e{border-color:#6b2f2f;color:#ffb4b4}
+
+.hidden{display:none!important}
+@media(max-width:1040px){.ctrl{position:static;max-height:none}}
+</style></head><body>
+
+<div class="topbar"><div class="in">
+  <div class="logo">🖼️</div>
+  <div class="brand">Wallpaper <span>Fetcher</span></div>
+  <span class="pill">7 free sources · keyless</span>
+  <span class="spacer"></span>
+  <button class="ghost sm" onclick="document.getElementById('srcCard').open=!document.getElementById('srcCard').open">Sources</button>
+</div></div>
+
+<div class="layout">
+
+<!-- ============ CONTROLS ============ -->
+<aside class="panel ctrl">
+  <div class="grp">
+    <h2>Keywords</h2>
+    <textarea id="kw" placeholder="sunflower field, minimal pattern, ocean waves&#10;comma ya nayi line se alag karo"></textarea>
+    <div class="hint">Har keyword alag search term banta hai &rarr; zyada variety. <b>Comma</b> ya <b>Enter</b> se alag.</div>
   </div>
 
-  <div class="row" style="margin-top:16px">
-    <div><label>Style / tone</label><select id="style">
-      <option value="soft">Light &amp; soft (gentle, bright)</option>
-      <option value="vivid">Vivid &amp; punchy (saturated)</option>
-      <option value="any">No style filter</option>
-    </select></div>
-    <div><label>Source (free / open APIs)</label><select id="source">
-      <option value="all">All 7 sources (best quality + max choice)</option>
-      <option value="wallhaven">Wallhaven API (best wallpapers)</option>
-      <option value="openverse">Openverse API (CC-licensed)</option>
-      <option value="commons">Wikimedia Commons (free licences)</option>
-      <option value="artic">Art Institute of Chicago (public-domain art)</option>
-      <option value="cma">Cleveland Museum of Art (CC0 art)</option>
-      <option value="nasa">NASA Image Library (public domain)</option>
-      <option value="pinterest">Pinterest (keyword search + home feed — bina key ✅)</option>
-    </select></div>
-    <div><label>Orientation</label><select id="orient">
-      <option value="landscape">Landscape (chauri - recommended)</option>
-      <option value="any">Any (landscape + portrait)</option>
-      <option value="portrait">Portrait (lambi)</option>
-    </select></div>
-    <div><label>Kitne wallpapers</label><input type="text" id="count" value="50">
-      <small>Max 10000. Bade number (1000+) = lamba time + <b>Orientation=Any</b> ya <b>min_res=1280</b> karo warna portrait/4K filters pool kaat dete hain.</small></div>
-    <div><label>Min resolution (long side)</label><select id="minres">
-      <option value="1920">1920 px</option><option value="2560">2560 px</option>
-      <option value="3840">3840 px</option><option value="1280">1280 px</option></select></div>
-    <div><label>Category</label><select id="cat">
-      <option value="general">General (recommended)</option><option value="all">General + Anime</option></select></div>
+  <div class="grp">
+    <h2>Colour</h2>
+    <div class="dots" id="swatches">
+      <button class="dot on" data-c="any" title="Any" style="background:conic-gradient(#ff5f6d,#ffc371,#7ee8fa,#a78bfa,#ff5f6d)"></button>
+      <button class="dot" data-c="yellow" title="Yellow" style="background:#ffd84d"></button>
+      <button class="dot" data-c="gold" title="Gold" style="background:#e0a527"></button>
+      <button class="dot" data-c="orange" title="Orange" style="background:#ff8c1a"></button>
+      <button class="dot" data-c="red" title="Red" style="background:#e5484d"></button>
+      <button class="dot" data-c="pink" title="Pink" style="background:#ff7ab6"></button>
+      <button class="dot" data-c="purple" title="Purple" style="background:#a78bfa"></button>
+      <button class="dot" data-c="blue" title="Blue" style="background:#4d9fff"></button>
+      <button class="dot" data-c="teal" title="Teal" style="background:#2ec4b6"></button>
+      <button class="dot" data-c="green" title="Green" style="background:#4caf50"></button>
+      <button class="dot" data-c="white" title="White" style="background:#f5f5f0"></button>
+      <button class="dot" data-c="grey" title="Grey" style="background:#9aa0a6"></button>
+      <button class="dot" data-c="black" title="Black" style="background:#242424"></button>
+      <span class="dotName" id="dotName">Any</span>
+    </div>
   </div>
-  <div class="checks">
-    <label><input type="checkbox" id="smart" checked> Smart filter (text / logo / food / brand hatao)</label>
-    <label><input type="checkbox" id="newfolder" checked> Hamesha nayi folder banao</label>
+
+  <div class="grp g2">
+    <div>
+      <h2>Style</h2>
+      <select id="style">
+        <option value="soft">Light &amp; soft</option>
+        <option value="vivid">Vivid</option>
+        <option value="any">No filter</option>
+      </select>
+    </div>
+    <div>
+      <h2>Orientation</h2>
+      <select id="orient">
+        <option value="landscape">Landscape</option>
+        <option value="any">Any</option>
+        <option value="portrait">Portrait</option>
+      </select>
+    </div>
+    <div>
+      <h2>Count</h2>
+      <input type="text" id="count" value="50" inputmode="numeric">
+    </div>
+    <div>
+      <h2>Min res</h2>
+      <select id="minres">
+        <option value="1920">1920 px</option><option value="2560">2560 px</option>
+        <option value="3840">3840 px</option><option value="1280">1280 px</option>
+      </select>
+    </div>
   </div>
-  <div class="row" style="align-items:flex-end">
-    <div><label>Folder ka naam (optional)</label><input type="text" id="folder" placeholder="auto: keywords se"></div>
+
+  <div class="grp">
+    <h2>Source</h2>
+    <select id="source">
+      <option value="all">All 7 sources</option>
+      <option value="wallhaven">Wallhaven — best wallpapers</option>
+      <option value="openverse">Openverse — CC-licensed</option>
+      <option value="commons">Wikimedia Commons</option>
+      <option value="artic">Art Institute of Chicago</option>
+      <option value="cma">Cleveland Museum of Art</option>
+      <option value="nasa">NASA Image Library</option>
+      <option value="pinterest">Pinterest — bina key</option>
+    </select>
   </div>
-  <button class="go" id="go" onclick="start()">Fetch karo</button>
+
+  <div class="grp g2">
+    <div>
+      <h2>Category</h2>
+      <select id="cat">
+        <option value="general">General</option><option value="all">General + Anime</option>
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:9px;padding-top:19px">
+      <label class="chk"><input type="checkbox" id="smart" checked> Smart filter</label>
+      <label class="chk"><input type="checkbox" id="newfolder" checked> Nayi folder</label>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h2>Folder naam <span style="text-transform:none;letter-spacing:0;color:#5d6674">(optional)</span></h2>
+    <input type="text" id="folder" placeholder="auto: keywords se banega">
+  </div>
+
+  <button class="go" id="go" onclick="start()">⚡ Fetch karo</button>
+  <div class="hint" style="text-align:center;margin-top:9px">
+    <b>Ctrl + Enter</b> se bhi chalega
+    <span id="warn" style="display:block;color:var(--warn);margin-top:5px"></span>
+  </div>
+</aside>
+
+<!-- ============ STAGE ============ -->
+<section class="panel stage">
+
+  <div class="phead">
+    <div class="steps" id="steps">
+      <span class="step" data-s="searching"><i></i>Search</span><span class="arrow">→</span>
+      <span class="step" data-s="analysing"><i></i>Analyse</span><span class="arrow">→</span>
+      <span class="step" data-s="downloading"><i></i>Download</span><span class="arrow">→</span>
+      <span class="step" data-s="done"><i></i>Done</span>
+    </div>
+    <div class="bar"><i id="fill"></i></div>
+    <div class="stats">
+      <div class="st"><u>Searched</u><b id="c1">0</b></div>
+      <div class="st"><u>Matched</u><b id="c3">0</b></div>
+      <div class="st"><u>Saved</u><b id="c4" class="hl">0</b></div>
+      <div class="st"><u>Target</u><b id="c5">0</b></div>
+    </div>
+    <div class="path"><span id="folderPath"></span>
+      <button class="ghost sm" onclick="openFolder()">📂 Kholo</button>
+      <button class="ghost sm" id="stopBtn" onclick="stopPoll()">Rok do</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-top:6px">
+      <span id="phase">—</span> · <span id="elapsed">0s</span> · <span id="rate"></span>
+    </div>
+  </div>
+
+  <div class="logwrap">
+    <div class="logHead"><h2>Live log</h2>
+      <button class="ghost sm" onclick="clearLog()">Clear</button></div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div id="res">
+    <div class="rhead">
+      <b>Saved</b><span class="cnt" id="resTitle">0</span>
+      <span style="flex:1"></span>
+      <button class="ghost sm" onclick="location.reload()">Naya fetch</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty hidden" id="empty"><div class="ic">🗂️</div>abhi kuch save nahi hua</div>
+    <div class="rfoot hidden" id="moreWrap">
+      <button class="ghost" id="moreBtn" onclick="renderMore()">Aur dikhao</button>
+    </div>
+  </div>
+
+  <details id="srcCard">
+    <summary>⚙️ Pinterest settings <span style="color:var(--mut)">(optional — bina key chalta hai ✅)</span></summary>
+    <div class="dbody">
+      <div class="g2" style="margin-bottom:11px">
+        <div><h2>Client ID</h2><input type="text" id="pinId" placeholder="123456789012"></div>
+        <div><h2>Client Secret</h2><input type="password" id="pinSec" placeholder="••••••••"></div>
+        <div style="grid-column:1/-1"><h2>Ya seedha access token</h2><input type="text" id="pinTok" placeholder="pinc... / pina..."></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="ghost sm" onclick="pinSave()">💾 Save + token banao</button>
+        <span id="pinMsg" style="font-size:12.5px;color:var(--mut)"></span>
+      </div>
+      <p style="margin-top:12px"><b>Pinterest ye card ke bina chalta hai</b> — tool apna Chromium (Playwright)
+        chalata hai aur <b>asli keyword search</b> (<code>/search/pins/?q=…</code>) + <code>/ideas/</code> +
+        home feed + public category feeds se images nikalta hai. <b>Na login, na key.</b></p>
+      <p><b>Personalized feed chahiye</b> to <code>pinterest-session.bat</code> double-click karo
+        (Chrome band &rarr; ENTER). Uske baad asli home feed + har pin ki real link/title milte hain.</p>
+      <p class="note">Bina login ke title/tag filters (food/text/logo deny) lagu nahi hote. Licence =
+        pinterest-content-license (personal use only). Pinterest <b>~90% portrait</b> deta hai &rarr;
+        landscape + Pinterest ≈ 0 yield.</p>
+      <p>Official API se search <b>restricted feature</b> hai — app ko milta hi nahi (401 consumer type /
+        402 sandbox). Ye card sirf tab kaam aayega jab approval mil jaye.</p>
+    </div>
+  </details>
+
+</section>
 </div>
 
-<div class="card hidden" id="prog">
-  <div class="phase" id="phase">queued</div>
-  <div class="bar"><i id="fill"></i></div>
-  <div class="stats">
-    <span>searched <b id="c1">0</b></span><span>analysed <b id="c2">0</b></span>
-    <span>matched <b id="c3">0</b></span><span>saved <b id="c4">0</b> / <b id="c5">0</b></span>
-    <span id="elapsed"></span>
-  </div>
-  <div class="folder" id="folderPath"></div>
-  <div style="display:flex;gap:10px;margin-top:12px">
-    <button class="ghost" onclick="openFolder()">📂 Folder kholo</button>
-    <button class="ghost" onclick="stopPoll()">Rok do</button>
-  </div>
-  <div id="log" style="margin-top:12px"></div>
-</div>
+<footer><div class="fin">
+  <details open>
+    <summary>🔗 Sources — 7 free options (sab keyless)</summary>
+    <div class="dbody">
+      <p>• <a href="https://wallhaven.cc/api-docs" target="_blank">Wallhaven API</a> — free wallpaper API<br>
+         • <a href="https://api.openverse.org/" target="_blank">Openverse API</a> — CC-licensed images (WordPress)<br>
+         • <a href="https://commons.wikimedia.org/w/api.php" target="_blank">Wikimedia Commons API</a> — free media (Wikipedia)<br>
+         • <a href="https://api.artic.edu/docs/" target="_blank">Art Institute of Chicago API</a> — public-domain art, IIIF<br>
+         • <a href="https://github.com/clevelandart/api" target="_blank">Cleveland Museum of Art API</a> — CC0 collection<br>
+         • <a href="https://images.nasa.gov/" target="_blank">NASA Image Library API</a> — public-domain space imagery<br>
+         • <b>Pinterest</b> — <b>Playwright browser</b> se asli keyword search (bina login/key; official
+           <a href="https://developers.pinterest.com/docs/api/v5/search_partner_pins/" target="_blank">search API</a> = restricted)</p>
+      <p>Har wallpaper ka original link + licence <code>manifest.csv</code> me save hota hai.
+         Best quality ranking: 4K (+14) &gt; 2K (+9) &gt; 1080p (+4), landscape default.</p>
+    </div>
+  </details>
+</div></footer>
 
-<div class="card hidden" id="res">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <b id="resTitle">Results</b>
-    <button class="ghost" onclick="location.reload()">Naya fetch</button>
-  </div>
-  <div class="grid" id="grid"></div>
-</div>
-
-<div class="card">
-  <b style="font-size:15px">⚙️ Pinterest Settings <span style="color:var(--mut);font-weight:400">(OPTIONAL — Pinterest bina key bhi chalta hai ✅)</span></b>
-  <div class="row" style="margin-top:12px">
-    <div><label>Client ID (app id)</label><input type="text" id="pinId" placeholder="123456789012"></div>
-    <div><label>Client Secret</label><input type="password" id="pinSec" placeholder="••••••••"></div>
-    <div><label>Ya seedha access token (optional)</label><input type="text" id="pinTok" placeholder="pinc... / pina..."></div>
-  </div>
-  <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
-    <button class="ghost" onclick="pinSave()">💾 Save + token banao</button>
-    <span id="pinMsg" style="font-size:13px;color:var(--mut)"></span>
-  </div>
-  <div style="font-size:12.5px;color:var(--mut);margin-top:10px;line-height:1.6">
-    <b>Pinterest ab is card ke bina chalta hai</b> — tool apna Chromium (Playwright)
-    khud chalata hai aur <b>asli keyword search</b>
-    (<code>/search/pins/?q=…</code>) + <code>/ideas/</code> + <b>home feed</b> + public category feeds
-    (<code>/wallpapers</code>, <code>/nature</code>, <code>/photography</code>…)
-    se images nikalta hai — <b>na login chahiye, na key</b>. Phir colour + orientation + resolution
-    filters lagte hain.<br>
-    <b>Optional (ek baar): apna Chrome session utha lo</b> — folder me
-    <code>pinterest-session.bat</code> double-click karo (Chrome band karo &rarr; ENTER).
-    Uske baad <b>asli personalized home feed</b> + har pin ki <b>real link/title</b>
-    automatically milte hain. Session <code>pin_session.json</code> me save ho jata hai.<br>
-    (Alternative: <code>pinterest-login.bat</code> — usme browser me khud login karna padta hai.)<br>
-    Ye card sirf tab kaam aayega jab Pinterest ka official API access mil jaye — tab
-    <code>/search/partner/pins</code> chalu ho jayega. Uske liye
-    <a href="https://developers.pinterest.com/apps/" target="_blank" style="color:#9ecbff">developers.pinterest.com/apps</a>
-    &rarr; <b>Client Credentials</b> grant, scope <code>boards:read,pins:read</code>, 2FA on — phir bhi
-    <b>restricted feature</b> + <b>trial approval</b> support ticket se hi milta hai.<br>
-    <span style="color:#e8b96a">Note: bina login ke Pinterest pe title/tag filters (food/text/logo deny)
-    lagu nahi hote (alt text khali aata hai). Licence = pinterest-content-license (sirf personal use).
-    Pinterest ~90% PORTRAIT images deta hai — phone wallpaper ke liye best.</span>
-  </div>
-</div>
-
-<footer>
-  <b>Sources — 7 free options (sab keyless; Pinterest official API optional hai):</b><br>
-  • <a href="https://wallhaven.cc/api-docs" target="_blank">Wallhaven API</a> — free wallpaper API (wallhaven.cc)<br>
-  • <a href="https://api.openverse.org/" target="_blank">Openverse API</a> — open source, CC-licensed images (WordPress)<br>
-  • <a href="https://commons.wikimedia.org/w/api.php" target="_blank">Wikimedia Commons API</a> — free-licensed media (Wikipedia)<br>
-  • <a href="https://api.artic.edu/docs/" target="_blank">Art Institute of Chicago API</a> — public-domain museum art, IIIF full-res<br>
-  • <a href="https://github.com/clevelandart/api" target="_blank">Cleveland Museum of Art API</a> — CC0 open-access collection<br>
-  • <a href="https://images.nasa.gov/" target="_blank">NASA Image and Video Library API</a> — public-domain space/science imagery<br>
-  • <b>Pinterest</b> — <b>Playwright browser</b> se asli <a href="https://www.pinterest.com/search/pins/?q=wallpaper" target="_blank">keyword search</a>
-     + <a href="https://www.pinterest.com/ideas/" target="_blank">/ideas</a> + home feed + public category feeds
-     (bina login/key; official <a href="https://developers.pinterest.com/docs/api/v5/search_partner_pins/" target="_blank">search API</a>
-     = restricted feature, app ko access nahi). Images <b>user-generated copyright</b> = personal use only.<br>
-  Har wallpaper ka original link + licence <code>manifest.csv</code> me save hota hai.<br>
-  Best quality: resolution boost 4K (+14) &gt; 2K (+9) &gt; 1080p (+4), landscape default.
-</footer>
-</div>
+<div id="toast"></div>
 
 <script>
-let job=null, timer=null, colour='any';
-document.getElementById('swatches').addEventListener('click', e=>{
-  const b=e.target.closest('.sw'); if(!b) return;
-  document.querySelectorAll('.sw').forEach(x=>x.classList.remove('on'));
+const $=id=>document.getElementById(id);
+let job=null,timer=null,colour='any',shown=0,rendered=new Set(),lastLogLen=0;
+const MAXPAGE=150;
+const COLOURNAME={any:'Any',yellow:'Yellow',gold:'Gold',orange:'Orange',red:'Red',pink:'Pink',
+  purple:'Purple',blue:'Blue',teal:'Teal',green:'Green',white:'White',grey:'Grey',black:'Black'};
+let files=[];
+
+/* ---------- toast ---------- */
+let tT=null;
+function toast(msg,isErr){
+  const t=$('toast'); t.textContent=msg; t.className=isErr?'e show':'show';
+  clearTimeout(tT); tT=setTimeout(()=>t.classList.remove('show'),isErr?5200:2600);
+}
+function clearLog(){$('log').innerHTML='';lastLogLen=0;}
+
+/* ---------- colour dots ---------- */
+$('swatches').addEventListener('click',e=>{
+  const b=e.target.closest('.dot'); if(!b) return;
+  document.querySelectorAll('.dot').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); colour=b.dataset.c;
+  $('dotName').textContent=COLOURNAME[colour]||colour;
+  save();
 });
+
+/* ---------- persistence ---------- */
+function save(){
+  try{localStorage.setItem('wf',JSON.stringify({
+    kw:$('kw').value, colour, style:$('style').value, orient:$('orient').value,
+    count:$('count').value, minres:$('minres').value, source:$('source').value,
+    cat:$('cat').value, smart:$('smart').checked, newfolder:$('newfolder').checked,
+    folder:$('folder').value}))}catch(e){}
+}
+function load(){
+  try{const d=JSON.parse(localStorage.getItem('wf')||'{}');
+    if(d.kw)$('kw').value=d.kw;
+    if(d.colour){colour=d.colour;
+      document.querySelectorAll('.dot').forEach(x=>x.classList.toggle('on',x.dataset.c===colour));
+      $('dotName').textContent=COLOURNAME[colour]||colour;}
+    ['style','orient','count','minres','source','cat','folder'].forEach(k=>{if(d[k]!==undefined&&d[k]!=='')$(k).value=d[k];});
+    if(d.smart!==undefined)$('smart').checked=d.smart;
+    if(d.newfolder!==undefined)$('newfolder').checked=d.newfolder;
+  }catch(e){}
+  warnCheck();
+}
+['kw','style','orient','count','minres','source','cat','folder','smart','newfolder']
+  .forEach(k=>$(k).addEventListener('change',()=>{save();warnCheck();}));
+$('kw').addEventListener('input',save);
+
+/* ---------- live warning (bade count + landscape) ---------- */
+function warnCheck(){
+  const n=parseInt($('count').value)||0, o=$('orient').value, s=$('source').value;
+  let w=[];
+  if(n>=300&&o==='landscape') w.push('Landscape + bade count = portrait sources (Pinterest/museum art) bahut kam milenge. Orientation "Any" karo.');
+  if(n>=1000&&o!=='any') w.push('1000+ ke liye Orientation "Any" better hai.');
+  if(n>=500&&s==='openverse') w.push('Openverse anon quota 200/day hai — 500+ nahi milenge.');
+  if(o==='landscape'&&s==='pinterest') w.push('Pinterest ≈90% portrait hai — landscape pe ~0 result.');
+  $('warn').innerHTML=w.join('<br>');
+}
+
+/* ---------- stepper ---------- */
+const ORDER=['queued','searching','analysing','downloading','done'];
+function setSteps(state){
+  let idx=ORDER.indexOf(state); if(idx<0)idx=0;
+  if(state==='error')idx=1;
+  document.querySelectorAll('#steps .step').forEach(el=>{
+    const s=ORDER.indexOf(el.dataset.s);
+    el.classList.toggle('on', s===idx && state!=='done');
+    el.classList.toggle('done', s<idx || state==='done');
+  });
+}
+
+/* ---------- start ---------- */
 async function start(){
-  const kw=document.getElementById('kw').value.trim();
-  if(!kw){alert('Pehle keywords daalo');return;}
-  const body={keywords:kw, count:+document.getElementById('count').value||50,
-    colour:colour, style:document.getElementById('style').value,
-    source:document.getElementById('source').value,
-    orientation:document.getElementById('orient').value,
-    min_res:+document.getElementById('minres').value,
-    category:document.getElementById('cat').value, smart:document.getElementById('smart').checked,
-    newfolder:document.getElementById('newfolder').checked, folder:document.getElementById('folder').value};
-  document.getElementById('go').disabled=true;
-  document.getElementById('prog').classList.remove('hidden');
-  document.getElementById('res').classList.add('hidden');
-  document.getElementById('grid').innerHTML='';
-  document.getElementById('log').textContent='';
-  const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const kw=$('kw').value.trim();
+  if(!kw){toast('Pehle keywords daalo',true);$('kw').focus();return;}
+  const body={keywords:kw,count:parseInt($('count').value)||50,colour,
+    style:$('style').value,source:$('source').value,orientation:$('orient').value,
+    min_res:parseInt($('minres').value),category:$('cat').value,
+    smart:$('smart').checked,newfolder:$('newfolder').checked,folder:$('folder').value};
+  save();
+  $('go').disabled=true;
+  files=[];rendered=new Set();shown=0;lastLogLen=0;
+  $('grid').innerHTML='';$('log').innerHTML='';$('moreWrap').classList.add('hidden');
+  $('empty').classList.remove('hidden');$('resTitle').textContent='0';
+  $('fill').classList.remove('ok');$('fill').style.width='0%';
+  setSteps('queued');
+  const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
   const j=await r.json();
-  if(j.error){alert(j.error);document.getElementById('go').disabled=false;return;}
-  job=j.job; timer=setInterval(poll,900); poll();
+  if(j.error){toast(j.error,true);$('go').disabled=false;return;}
+  job=j.job;timer=setInterval(poll,1000);poll();
 }
+
+/* ---------- poll ---------- */
 async function poll(){
-  if(!job) return;
-  const r=await fetch('/api/status?job='+job); const s=await r.json();
-  document.getElementById('phase').textContent=s.state;
-  const c=s.counts, tgt=Math.max(c.target,1);
-  document.getElementById('fill').style.width=Math.min(100,100*c.saved/tgt)+'%';
-  c1.textContent=c.searched; c2.textContent=c.analysed; c3.textContent=c.matched;
-  c4.textContent=c.saved; c5.textContent=c.target;
-  document.getElementById('elapsed').textContent=s.elapsed+'s';
-  document.getElementById('folderPath').textContent=s.folder||'';
-  document.getElementById('log').textContent=s.log.join('\n');
-  const log=document.getElementById('log'); log.scrollTop=log.scrollHeight;
-  if(s.files.length){
-    document.getElementById('res').classList.remove('hidden');
-    document.getElementById('resTitle').textContent='Saved: '+s.files.length;
-    const g=document.getElementById('grid');
-    g.innerHTML=s.files.map(f=>`<div class="t"><img loading="lazy" src="${f.url}">
-      <div class="m"><span class="badge">${f.src}</span><b>${f.name}</b>${f.res} &middot; score ${f.score} &middot; ${f.license}</div></div>`).join('');
+  if(!job)return;
+  let s;
+  try{const r=await fetch('/api/status?job='+job);s=await r.json();}
+  catch(e){return;}
+  setSteps(s.state);
+  $('phase').textContent=s.state;
+  const c=s.counts,tgt=Math.max(c.target,1);
+  const pct=Math.min(100,100*c.saved/tgt);
+  $('fill').style.width=pct+'%';
+  $('c1').textContent=c.searched;$('c3').textContent=c.matched;
+  $('c4').textContent=c.saved;$('c5').textContent=c.target;
+  $('elapsed').textContent=s.elapsed+'s';
+  const mins=s.elapsed/60;
+  $('rate').textContent = (s.state==='downloading'&&mins>0.3)
+    ? (c.saved/mins).toFixed(0)+' img/min' : '';
+  $('folderPath').textContent=s.folder||'';
+  $('folderPath').title=s.folder||'';
+
+  /* log - sirf naya append karo (scroll jump nahi) */
+  const L=s.log||[];
+  if(L.length!==lastLogLen){
+    const lg=$('log');
+    if(L.length<lastLogLen){lg.innerHTML='';lastLogLen=0;}
+    const near = lg.scrollHeight-lg.scrollTop-lg.clientHeight < 40;
+    for(let i=lastLogLen;i<L.length;i++){
+      const d=document.createElement('div');
+      const txt=L[i];
+      d.className = /error|fail|skip|removed/i.test(txt)?'err' : /done|saved|match/i.test(txt)?'ok':'';
+      d.textContent=txt; lg.appendChild(d);
+    }
+    lastLogLen=L.length;
+    while(lg.children.length>400)lg.removeChild(lg.firstChild);
+    if(near)lg.scrollTop=lg.scrollHeight;
   }
+
+  /* files - sirf naye append karo (rebuild nahi) */
+  if(s.files&&s.files.length){
+    let got=false;
+    for(const f of s.files){ if(!rendered.has(f.name)){ rendered.add(f.name); files.push(f); got=true; } }
+    if(got){$('resTitle').textContent=files.length;$('empty').classList.add('hidden');renderMore();}
+  }
+
   if(s.state==='done'||s.state==='error'){
-    clearInterval(timer); timer=null;
-    document.getElementById('go').disabled=false;
-    if(s.state==='error') alert('Error: '+s.error);
-    else document.getElementById('fill').style.width='100%';
+    clearInterval(timer);timer=null;$('go').disabled=false;
+    if(s.state==='error'){toast('Error: '+s.error,true);}
+    else{$('fill').style.width='100%';$('fill').classList.add('ok');
+      toast('Ho gaya — '+c.saved+' wallpapers · '+(s.folder||''));}
   }
 }
-function stopPoll(){if(timer){clearInterval(timer);timer=null;} document.getElementById('go').disabled=false;}
-async function openFolder(){ if(job) await fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job})}); }
+
+function renderMore(){
+  const g=$('grid');
+  const end=Math.min(files.length,shown+MAXPAGE);
+  let html='';
+  for(let i=shown;i<end;i++){
+    const f=files[i];
+    html+=`<a class="t" href="${f.url}" target="_blank" title="${f.name}">
+      <img loading="lazy" src="${f.url}" alt="">
+      <span class="badge">${f.src||''}</span>
+      <span class="ov"><b>${f.name}</b><em>${f.res||''} · score ${f.score??''} · ${f.license||''}</em></span></a>`;
+  }
+  g.insertAdjacentHTML('beforeend',html);
+  shown=end;
+  $('moreWrap').classList.toggle('hidden',shown>=files.length);
+  if(files.length>shown)$('moreBtn').textContent='Aur dikhao ('+(files.length-shown)+' baaki)';
+}
+
+function stopPoll(){
+  if(timer){clearInterval(timer);timer=null;}
+  $('go').disabled=false;$('stopBtn').textContent='Rok diya';
+  toast('Polling rok diya (server pe chal raha job nahi ruka — alag cheez hai)');
+}
+async function openFolder(){if(job)await fetch('/api/open',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({job})});}
+
+/* ---------- pinterest ---------- */
 async function pinSave(){
-  const m=document.getElementById('pinMsg'); m.textContent='saving...';
+  const m=$('pinMsg');m.textContent='saving...';m.style.color='var(--mut)';
   const r=await fetch('/api/pinterest',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({client_id:document.getElementById('pinId').value.trim(),
-                         client_secret:document.getElementById('pinSec').value.trim(),
-                         access_token:document.getElementById('pinTok').value.trim()})});
+    body:JSON.stringify({client_id:$('pinId').value.trim(),client_secret:$('pinSec').value.trim(),
+      access_token:$('pinTok').value.trim()})});
   const j=await r.json();
-  m.style.color = j.error ? '#ff8a8a' : '#9ee493';
-  m.textContent = j.error ? j.error : (j.token ? 'OK - token ban gaya ('+j.token.slice(0,12)+'...)' : j.msg);
+  m.style.color=j.error?'var(--err)':'var(--ok)';
+  m.textContent=j.error?j.error:(j.token?'OK - token ban gaya ('+j.token.slice(0,12)+'...)':j.msg);
 }
 async function pinLoad(){
-  try{
-    const j=await (await fetch('/api/pinterest')).json();
-    document.getElementById('pinId').value=j.client_id||'';
-    document.getElementById('pinTok').value=j.access_token?'(saved)':'';
-    if(j.token) document.getElementById('pinMsg').textContent='token active: '+j.token.slice(0,14)+'...';
+  try{const j=await(await fetch('/api/pinterest')).json();
+    $('pinId').value=j.client_id||'';
+    $('pinTok').value=j.access_token?'(saved)':'';
+    if(j.token)$('pinMsg').textContent='token active: '+j.token.slice(0,14)+'...';
   }catch(e){}
 }
-pinLoad();
-document.getElementById('kw').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))start();});
+$('kw').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();start();}});
+load();pinLoad();
 </script></body></html>"""
+
 
 @app.route("/")
 def index():
