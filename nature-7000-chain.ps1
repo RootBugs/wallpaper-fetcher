@@ -1,5 +1,5 @@
-# nature-7000 chain: tab tak runs karta rahe jab tak folder me 7000 images na ho jayein.
-# Har run ek hi folder me save hota hai -> cross-run dedupe (seen_ids + ahash) kaam karta hai.
+# nature-7000 chain: keeps launching runs until the folder holds 7000 images.
+# Every run saves into the SAME folder -> cross-run dedupe (seen_ids + ahash) applies.
 $ErrorActionPreference = "Stop"
 $API   = "http://127.0.0.1:8765"
 $FOLDER = "C:\Users\hp\Pictures\nature-7000"
@@ -18,26 +18,26 @@ function Count-Images {
              Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp)$' }).Count
 }
 
-W ("chain start - abhi images: " + (Count-Images))
+W ("chain start - images right now: " + (Count-Images))
 
 # ---- manifest reconcile ----
-# Server crash ho to images disk pe reh jaati hain par manifest nahi banti ->
-# agla run seq=old_rows leta aur purani files OVERWRITE kar deta + duplicate
-# bante. Har start se pehle isliye manifest disk se sync karwate hain.
+# If the server crashes, images stay on disk but the manifest is never written.
+# The next run would then take seq = old_rows, OVERWRITE old files and create
+# duplicates. So the manifest is re-synced from disk before every start.
 function Sync-Manifest {
     try {
         $out = & python "C:\Users\hp\wallpaper-tool\fix_manifest.py" 2>&1 |
-               Where-Object { $_ -match 'manifest=|added=|missing nahi' }
+               Where-Object { $_ -match 'manifest=|added=|missing' }
         foreach ($o in $out) { W ("  sync: " + $o) }
     } catch { W ("  sync FAIL: " + $_) }
 }
 Sync-Manifest
 
-$fails = 0   # lagatar server failures -> 5 baar tak retry, phir band
+$fails = 0   # consecutive server failures -> retry up to 5 times, then stop
 
 for ($run = 1; $run -le $MAXRUNS; $run++) {
     $have = Count-Images
-    if ($have -ge $TARGET) { W ("TARGET mil gaya: $have/$TARGET"); break }
+    if ($have -ge $TARGET) { W ("TARGET reached: $have/$TARGET"); break }
 
     $body = @{
         keywords   = "nature, landscape, aesthetic"
@@ -53,12 +53,12 @@ for ($run = 1; $run -le $MAXRUNS; $run++) {
         folder     = "nature-7000"
     } | ConvertTo-Json
 
-    W ("--- run " + $run + " (start, images abhi " + $have + ") ---")
+    W ("--- run " + $run + " (starting, images so far " + $have + ") ---")
     try {
         $r = Invoke-RestMethod -Uri "$API/api/start" -Method Post -Body $body `
                                -ContentType "application/json" -TimeoutSec 30
     } catch {
-        W ("START FAIL (server band hai?): " + $_); break
+        W ("START FAIL (is the server down?): " + $_); break
     }
     $job = $r.job
     W ("job = " + $job)
@@ -71,20 +71,20 @@ for ($run = 1; $run -le $MAXRUNS; $run++) {
             $fails = 0
         } catch {
             $fails++
-            W ("status FAIL #$fails (server zinda hai?): " + $_.Exception.Message)
-            if ($fails -ge 5) { W ("CHAIN ABORT - server band ho gaya. dobara start karo."); break }
+            W ("status FAIL #$fails (is the server alive?): " + $_.Exception.Message)
+            if ($fails -ge 5) { W ("CHAIN ABORT - the server went down. Restart it and run again."); break }
             Start-Sleep -Seconds 20; continue
         }
         if ($s.state -eq "done")   { W ("run done -> saved " + $s.counts.saved); Sync-Manifest; break }
         if ($s.state -eq "error")  { W ("run ERROR: " + $s.error); break }
-        # beech me progress note (har ~5 min)
+        # progress note every ~5 minutes
         if (-not $script:tick) { $script:tick = 0 }
         $script:tick++
         if ($script:tick % 15 -eq 0) {
             W ("  " + $s.state + "  saved=" + $s.counts.saved + "/" + $s.counts.target)
         }
     }
-    W ("folder abhi: " + (Count-Images) + " images")
+    W ("folder now: " + (Count-Images) + " images")
 }
 
 W ("chain END - final: " + (Count-Images) + " images  ->  $FOLDER")

@@ -1,13 +1,14 @@
 """
-Chrome se Pinterest cookies nikaal kar pin_session.json me save karta hai.
+Extracts Pinterest cookies from Chrome and saves them to pin_session.json.
 
-CHALANE SE PEHLE: apna Chrome BAND karo (warna Cookies DB lock rehti hai).
+BEFORE RUNNING: close Chrome (otherwise the cookies DB stays locked).
 
-- v10 cookies  -> DPAPI + AES-GCM se decrypt (kaam karta hai)
-- v20 cookies  -> Chrome App-Bound Encryption -> bahar se decrypt NAHI hota
-                  (tab tool seedha Chrome se chalayega - dekh bat file)
+- v10 cookies -> decrypted with DPAPI + AES-GCM (works)
+- v20 cookies -> Chrome App-Bound Encryption, cannot be decrypted from outside
+                  (in that case the tool drives your installed Chrome instead -
+                   see the .bat file)
 
-Output: pin_session.json  (pin_home_feed.py ise auto-load karta hai)
+Output: pin_session.json  (auto-loaded by pin_home_feed.py)
 """
 import base64, ctypes, ctypes.wintypes, json, os, sqlite3, sys
 
@@ -44,12 +45,12 @@ def aesgcm_decrypt(key: bytes, ev: bytes) -> bytes:
 
 def main():
     if not os.path.exists(COOKIES):
-        print("ERROR: Chrome Cookies DB nahi mili:", COOKIES)
+        print("ERROR: Chrome cookies database not found:", COOKIES)
         return 1
     try:
         open(COOKIES, "rb").close()
     except PermissionError:
-        print("LOCKED: Chrome chal raha hai -> pehle Chrome BAND karo, phir dobara chalao.")
+        print("LOCKED: Chrome is running -> close it first, then run this again.")
         return 2
 
     ls = json.load(open(LOCAL_STATE, encoding="utf-8"))
@@ -65,8 +66,8 @@ def main():
     con.close()
 
     if not rows:
-        print("NO_COOKIES: Pinterest ki koi cookie nahi mili "
-              "-> kya tum Chrome me Pinterest pe login ho?")
+        print("NO_COOKIES: no Pinterest cookies found "
+              "-> are you logged in to Pinterest in Chrome?")
         return 3
 
     out, v20, failed = [], [], []
@@ -108,12 +109,12 @@ def main():
 
     sess = [c for c in out if c["name"] in ("_pinterest_sess", "_auth", "csrftoken")]
     if not sess:
-        print("NO_SESSION: _pinterest_sess / _auth / csrftoken nahi mili.")
+        print("NO_SESSION: _pinterest_sess / _auth / csrftoken not found.")
         return 4
     auth = next((c for c in out if c["name"] == "_auth"), None)
     print("_auth =", auth["value"] if auth else "(missing)")
     if auth and auth["value"] in ("0", "", None):
-        print("WARN: _auth=0 -> Chrome me Pinterest LOGIN nahi hai.")
+        print("WARN: _auth=0 -> you are NOT logged in to Pinterest in Chrome.")
 
     json.dump(out, open(OUT, "w", encoding="utf-8"), indent=1)
     print("SAVED:", OUT, f"({len(out)} cookies)")

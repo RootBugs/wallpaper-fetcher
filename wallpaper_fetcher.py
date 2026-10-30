@@ -1,7 +1,7 @@
 """
 Wallpaper Fetcher - local web tool (universal: any colour, any free/open API source)
 Run:  python wallpaper_fetcher.py   (or double-click start-wallpaper-tool.bat)
-Then: browser me http://127.0.0.1:8765 kholo
+Then: open http://127.0.0.1:8765 in your browser
 
 Sources (free / open, no API key needed - 6 total):
   1. Wallhaven API             https://wallhaven.cc/api-docs
@@ -10,7 +10,7 @@ Sources (free / open, no API key needed - 6 total):
   4. Art Institute of Chicago  https://api.artic.edu/docs/   (public-domain, IIIF)
   5. Cleveland Museum of Art   https://github.com/clevelandart/api  (CC0)
   6. NASA Image Library        https://images.nasa.gov/       (public domain)
-Har wallpaper ka source URL + licence manifest.csv me jaata hai.
+Every wallpaper's source URL and licence are written to manifest.csv.
 """
 import io, os, re, csv, json, time, math, colorsys, shutil, threading, uuid, webbrowser, hashlib, base64, subprocess, sys
 from collections import deque
@@ -31,12 +31,12 @@ CMA_API = "https://openaccess-api.clevelandart.org/api/artworks/"   # Cleveland 
 NASA_API = "https://images-api.nasa.gov/search"                     # NASA library
 PIN_SEARCH = "https://api.pinterest.com/v5/search/partner/pins"     # Pinterest (beta)
 PIN_TOKEN = "https://api.pinterest.com/v5/oauth/token"
-# client_id / client_secret / access_token yahan (tool folder me)
+# client_id / client_secret / access_token go here (inside the tool folder)
 PIN_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pinterest.json")
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 UA_WM = {"User-Agent": "WallpaperFetcher/1.0 (local personal tool; python-requests)"}
-# ARTIC ke API docs ke mutabik AIC-User-Agent header zaroori hai
+# ARTIC's API docs require an AIC-User-Agent header
 UA_ART = {"User-Agent": UA["User-Agent"],
           "AIC-User-Agent": "WallpaperFetcher/1.0 (local personal tool)"}
 ROOT = r"C:\Users\hp\Pictures"
@@ -45,8 +45,8 @@ PORT = 8765
 TEXT_EXCL = (" -quote -quotes -text -typography -typo -lettering -font -lyric -poem "
              "-saying -calligraphy -words")
 
-# ---------- colour system: user koi bhi colour choose kar sakta hai ----------
-# hue ranges (degrees) - wrap-aware match hona chahiye
+# ---------- color system: the user can pick any colour ----------
+# hue ranges (degrees) - matching must be wrap-aware
 COLOUR_RANGES = {
     "yellow": (45, 70), "gold": (34, 50), "orange": (18, 40), "red": (345, 15),
     "pink": (300, 345), "purple": (255, 300), "blue": (195, 255), "teal": (160, 195),
@@ -54,11 +54,11 @@ COLOUR_RANGES = {
 }
 ACHROMATIC = ("white", "grey", "black")
 ALL_COLOURS = ["any"] + list(COLOUR_RANGES.keys()) + list(ACHROMATIC)
-# sab sources free/open hain; pinterest sirf free *trial* tier deta hai (key chahiye)
+# every source is free/open; Pinterest only ships a free *trial* tier (needs a key)
 ALL_SOURCES = ["wallhaven", "openverse", "commons", "artic", "cma", "nasa", "pinterest"]
 
-# content-based deny (text/logo/IP/food/interiors/vehicles/people ...). NOTE: koi
-# colour-shabd nahi - colour to user ki choice hai.
+# content-based deny (text/logo/IP/food/interiors/vehicles/people ...). NOTE: no
+# colour words here - colour is entirely the user's choice.
 DENY = [
     "text", "typography", "quote", "quotes", "lettering", "font", "lyric", "watermark",
     "logo", "brand", "meme", "rage", "troll",
@@ -84,7 +84,7 @@ DENY = [
 DENY_RE = [re.compile(r"\b" + re.escape(d) + r"\b") for d in DENY]
 
 def title_denied(text, ignore=()):
-    """ignore: kuch shabd chhod do (jaise NASA source ke liye 'nasa')."""
+    """ignore: drop a few words (e.g. 'nasa' when that source is selected)."""
     t = (text or "").lower()
     for rx in DENY_RE:
         if rx.pattern[2:-2] in ignore:      # \bXYZ\b -> XYZ
@@ -95,7 +95,7 @@ def title_denied(text, ignore=()):
 
 # ---------------- helpers ----------------
 def _int(v):
-    """API kabhi string deti hai (CMA width/height) - safe int."""
+    """APIs sometimes return strings (CMA width/height) - safe int."""
     try:
         return int(float(v))
     except (TypeError, ValueError):
@@ -149,7 +149,7 @@ def analyze_bytes(b):
     B = sum(p[2] for p in px) / n
     L = 0.299 * R + 0.587 * G + 0.114 * B
     hh, ss, _ = colorsys.rgb_to_hsv(R / 255, G / 255, B / 255)
-    # per-pixel hue bins (36 x 10 deg), sirf chromatic pixels
+    # per-pixel hue bins (36 x 10 deg), chromatic pixels only
     bins = [0] * 36
     chromatic = 0
     for (r, g, bl) in px:
@@ -176,7 +176,7 @@ def analyze_bytes(b):
             "bins": bins, "chrom": chromatic / n}
 
 def match_frac(m, colour):
-    """Chromatic pixels ka fraction jo selected colour ke hue range (+/-10 tol) me hai."""
+    """Fraction of chromatic pixels whose hue falls in the selected colour range (+/-10 tol)."""
     lo, hi = COLOUR_RANGES[colour]
     idxs = [i for i in range(36) if in_range(i * 10 + 5, lo - 10, hi + 10)]
     if m["chrom"] < 0.20:
@@ -184,7 +184,7 @@ def match_frac(m, colour):
     return sum(m["bins"][i] for i in idxs) / max(1, sum(m["bins"]))
 
 def metrics_ok(m, colour, style, relaxed=False, orient="landscape"):
-    # ---- orientation gate: wallpaper = chauri (landscape) chahiye ----
+    # ---- orientation gate: a wallpaper should be wide (landscape) ----
     if orient != "any" and m["w"] and m["h"]:
         if orient == "landscape" and m["w"] < m["h"]:
             return False
@@ -232,7 +232,7 @@ def score_of(m, colour, style):
     return round(base, 2)
 
 def res_bonus(it):
-    """Best quality: bada resolution = zyada score -> ranking me aage."""
+    """Quality score: bigger resolution = higher score -> ranks higher."""
     big = max(it.get("w") or 0, it.get("h") or 0)
     if big >= 3840:
         return 14
@@ -249,15 +249,15 @@ def ahash(img):
     return sum((1 << i) for i, v in enumerate(px) if v > avg)
 
 def src_headers(src):
-    """ARTIC ke host ko AIC-User-Agent chahiye, warna 403."""
+    """ARTIC's host requires the AIC-User-Agent header, otherwise 403."""
     return UA_ART if src == "artic" else UA
 
-WM_W = (3840, 2560, 1920, 1280)     # thumb.wikimedia.org inhe reliably serve karta hai
+WM_W = (3840, 2560, 1920, 1280)     # thumb.wikimedia.org serves these reliably
 
 def alt_urls(u):
-    """Wikimedia originals (upload-host) 429 de sakta hai -> thumb-host fallback ladder.
-    Pinterest: originals 403 ho sakta hai (cache nahi) -> size ladder. Thumb URL ko
-    chhota hi rakhte hain (analysis me full-res download bekar hai)."""
+    """Wikimedia originals (upload host) may 429 -> thumb-host fallback ladder.
+    Pinterest originals may 403 (not cached) -> size ladder. Thumb URLs stay
+    small (downloading full-res just to analyse it would be a waste)."""
     if "i.pinimg.com/" in u:
         try:
             rest = u.split("i.pinimg.com/", 1)[1]
@@ -287,7 +287,7 @@ def alt_urls(u):
         return [u]
 
 def dl_first(urls, timeout, tries, headers, backoff=True):
-    """URL ladder me se pehla jo 200 de wahi return karo."""
+    """Return the first URL in the ladder that answers 200."""
     for i, u in enumerate(urls):
         last = i == len(urls) - 1
         r = http_get(u, timeout=timeout, tries=tries if last else 1,
@@ -304,7 +304,7 @@ def http_get(url, timeout=30, tries=3, params=None, headers=None, backoff=True):
                 return r
             if r.status_code == 429:
                 if not backoff:
-                    return None        # fallback URL try karo (fast-fail, wait mat karo)
+                    return None        # try the fallback URL (fast-fail, do not wait)
                 time.sleep(10 + i * 5)
                 continue
             return None
@@ -314,12 +314,12 @@ def http_get(url, timeout=30, tries=3, params=None, headers=None, backoff=True):
             time.sleep(1 + i)
     return None
 
-# ---------------- sources (sab free/open APIs) ----------------
+# ---------------- sources (all free / open APIs) ----------------
 def search_wallhaven(kw, cat, min_res, colour, smart, pages, seen, out,
                      pacing=0.3, start_page=1, max_add=None):
     """https://wallhaven.cc/api-docs - free, no key. colours prefilter + text exclusions.
-    Returns next page number (resume ke liye) ya None agar aur pages nahi.
-    max_add: sirf itne hi naye candidates add karo (fair-share quota ke liye)."""
+    Returns the next page number (for resuming) or None when there are no pages left.
+    max_add: only add this many new candidates (fair-share quota)."""
     q = kw + (TEXT_EXCL if smart else "")
     page = start_page
     end = start_page + pages - 1
@@ -328,7 +328,7 @@ def search_wallhaven(kw, cat, min_res, colour, smart, pages, seen, out,
         r = http_get(WH_API, params={"q": q, "categories": cat, "purity": "100",
                                      "sorting": "relevance", "page": page})
         if not r:
-            return page            # rate-limit/err: yahin se aage badhna hai baad me
+            return page            # rate-limit/error: resume from here later
         data = r.json().get("data", [])
         capped = False
         for it in data:
@@ -358,12 +358,12 @@ def search_wallhaven(kw, cat, min_res, colour, smart, pages, seen, out,
             })
             added += 1
         if capped:
-            return page            # quota poori - is page se aage baad me
+            return page            # quota filled - resume after this page
         if page >= r.json().get("meta", {}).get("last_page", 1) or len(data) < 24:
-            return None             # aur pages nahi
+            return None             # no more pages
         page += 1
         time.sleep(pacing)
-    return page                    # limit poori - aage ke pages resume ke liye bache
+    return page                    # limit reached - later pages kept for resuming
 
 def search_openverse(kw, min_res, colour, seen, out, pages=6, max_add=None):
     """https://api.openverse.org/ - CC-licensed open source. Anon limit 20/min, 200/day."""
@@ -407,7 +407,7 @@ def search_openverse(kw, min_res, colour, seen, out, pages=6, max_add=None):
             added += 1
         if capped or not results or page * 20 >= (j.get("result_count") or 0):
             break
-        time.sleep(3.2)      # anon burst limit 20/min ka respect
+        time.sleep(3.2)      # respect the anonymous burst limit of 20/min
     time.sleep(1.0)
 
 def search_commons(kw, min_res, colour, seen, out, pages=3, max_add=None):
@@ -460,7 +460,7 @@ def search_commons(kw, min_res, colour, seen, out, pages=3, max_add=None):
 
 def search_artic(kw, min_res, seen, out, pages=3, max_add=None):
     """https://api.artic.edu/docs/ - Art Institute of Chicago open access.
-    Public-domain art, IIIF full-res (4000px tak), no API key. AIC-User-Agent header chahiye."""
+    Public-domain art, IIIF full-res (up to 4000px), no API key. Needs the AIC-User-Agent header."""
     added = 0
     for page in range(1, pages + 1):
         r = http_get(ART_API, headers=UA_ART, timeout=40, params={
@@ -480,7 +480,7 @@ def search_artic(kw, min_res, seen, out, pages=3, max_add=None):
                 break
             iid = a.get("image_id")
             if not iid or not a.get("is_public_domain"):
-                continue                      # sirf public domain = fully legal
+                continue                      # public domain only = fully legal
             aid = "ac_" + str(a.get("id"))
             if aid in seen:
                 continue
@@ -557,8 +557,8 @@ def search_cma(kw, min_res, seen, out, pages=3, max_add=None):
 
 def search_nasa(kw, min_res, seen, out, pages=3, max_add=None):
     """https://images-api.nasa.gov/ - NASA image library, public domain, no API key.
-    Space/earth/science photos - 4K tak milte hain (search metadata me res nahi hota,
-    isliye min_res check save() ke waqt actual pixels par hota hai)."""
+    Space/earth/science photos - up to 4K (search metadata has no resolution,
+    so min_res is checked against the actual pixels at save() time)."""
     added = 0
     for page in range(1, pages + 1):
         r = http_get(NASA_API, timeout=40,
@@ -602,7 +602,7 @@ def search_nasa(kw, min_res, seen, out, pages=3, max_add=None):
             break
         time.sleep(0.3)
 
-# ---------------- Pinterest (free *trial* tier - token chahiye) ----------------
+# ---------------- Pinterest (free *trial* tier - needs a token) ----------------
 _PIN = {"tok": "", "exp": 0.0}
 
 def pin_load_cfg():
@@ -613,7 +613,7 @@ def pin_load_cfg():
         return {}
 
 def pin_token():
-    """Token cache -> nahi to client_credentials se khud laao (30 din valid, 2FA chahiye)."""
+    """Token cache -> otherwise fetch one via client_credentials (valid 30 days, needs 2FA)."""
     now = time.time()
     if _PIN["tok"] and now < _PIN["exp"] - 120:
         return _PIN["tok"]
@@ -649,13 +649,13 @@ def pin_token():
         print(f"[pinterest] token error: {e}")
     return tok or ""
 
-# -------- Pinterest: PUBLIC FEED se images (bina login, bina API key) --------
+# -------- Pinterest: images from the PUBLIC FEED (no login, no API key) --------
 # Official v5 search (`/search/partner/pins`) = "restricted feature: pin_search" +
-# app "trial access pending" (code 3) -> dono Pinterest support se hi hote hain.
-# Lekin public pages (/wallpapers, /nature, ...) server-side <link rel="preload">
-# me pinimg URLs dete hain, aur i.pinimg.com/originals/<hash> full-res deta hai.
-# Pin ID/title client-side load hote hain (HTML me nahi) -> landing = page URL,
-# aur title/tag based deny (food/text/logo) Pinterest pe lagu NAHI hota.
+# app "trial access pending" (code 3) - both only come from Pinterest support.
+# But the public pages (/wallpapers, /nature, ...) emit pinimg URLs in a server-side
+# <link rel="preload"> tag, and i.pinimg.com/originals/<hash> gives full res.
+# Pin ID/title load client-side (not in the HTML) -> landing = the page URL,
+# and the title/tag deny-lists (food/text/logo) do not apply on Pinterest.
 PIN_FEEDS = [
     "https://www.pinterest.com/wallpapers/",
     "https://www.pinterest.com/nature/",
@@ -671,7 +671,7 @@ PIN_FEEDS = [
 _PIN_RE = re.compile(r"i\.pinimg\.com/[^/\"\s]+/"
                      r"([0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{8,}\.[A-Za-z]{3,4})",
                      re.I)
-# keyword -> kaunsi feed pehle (search keyless hai, isliye ye ordering)
+# keyword -> which feed to try first (search is keyless, hence this ordering)
 _PIN_HINTS = [
     ("wallpaper desktop background screen", ("wallpapers", "ideas", "explore")),
     ("flower tree mountain forest sky nature", ("nature", "travel", "ideas")),
@@ -681,10 +681,10 @@ _PIN_HINTS = [
     ("fashion dress outfit style", ("fashion", "ideas")),
     ("tattoo ink", ("tattoos", "design")),
 ]
-_PIN_API_BLOCKED = False          # restricted/trial error milte hi retry band
+_PIN_API_BLOCKED = False          # stop retrying once a restricted/trial error appears
 
 def _pin_feeds_for(kw):
-    """Keyword se pehle relevant feed, phir baaki sab."""
+    """Relevant feed for the keyword first, then all the others."""
     k = (kw or "").lower()
     slug2url = {u.rstrip("/").rsplit("/", 1)[-1]: u for u in PIN_FEEDS}
     ranked, used = [], set()
@@ -699,7 +699,7 @@ def _pin_feeds_for(kw):
     return ranked
 
 def _pin_from_feed(kw, seen, out, feeds, max_add, note=None):
-    """Har feed ka HTML fetch -> unique hashes -> /originals/ candidates."""
+    """Fetch each feed's HTML -> unique hashes -> /originals/ candidates."""
     got = 0
     for u in feeds:
         if max_add is not None and got >= max_add:
@@ -712,7 +712,7 @@ def _pin_from_feed(kw, seen, out, feeds, max_add, note=None):
         except Exception:
             continue
         if not hashes and note is not None:
-            note(f"pinterest: {u.rstrip('/').rsplit('/', 1)[-1]} se kuch nahi mila")
+            note(f"pinterest: nothing found on {u.rstrip('/').rsplit('/', 1)[-1]}")
         for hsh in hashes:
             if max_add is not None and got >= max_add:
                 break
@@ -726,9 +726,9 @@ def _pin_from_feed(kw, seen, out, feeds, max_add, note=None):
             out.append({
                 "id": pid,
                 "path": f"https://i.pinimg.com/originals/{hsh}",   # full-res
-                "thumb": f"https://i.pinimg.com/1200x/{hsh}",      # analysis ke liye
+                "thumb": f"https://i.pinimg.com/1200x/{hsh}",      # for analysis
                 "ext": ext,
-                "landing": u,                    # pin ID HTML me nahi hota
+                "landing": u,                    # pin ID is not in the HTML
                 "src": "pinterest",
                 "license": "pinterest-content-license",   # user-generated!
                 "title": "", "q": kw, "w": 0, "h": 0,
@@ -742,11 +742,11 @@ PIN_SCRAPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pin_home
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 def _pin_urls_for(kw):
-    """Playwright ke liye URL list.
-    #1 = keyword SEARCH (bina login chalta hai - official API me blocked tha!)
+    """URL list for Playwright.
+    #1 = keyword SEARCH (works without login - the official API is blocked!)
     #2 = ideas (sabse rich logged-out page)
-    #3 = HOME (login ho to asli personalized feed)
-    phir relevant category feeds."""
+    #3 = HOME (your real personalized home feed when logged in)
+    then the relevant category feeds."""
     try:
         from urllib.parse import quote as _q
     except Exception:
@@ -766,8 +766,8 @@ def _pin_urls_for(kw):
 def _pin_home_feed(kw, seen, out, max_add, note=None, scroll=10, wlog=150,
                    login=False):
     """Pinterest via Playwright (browser render + infinite scroll).
-    login=False -> --allow-anon: bina login sab public pages chalte hain
-    login=True  -> headed browser, tum login karo (asli personalized home feed)"""
+    login=False -> --allow-anon: every public page works without a login
+    login=True  -> headed browser, you log in (real personalized home feed)"""
     if not os.path.exists(PIN_SCRAPER):
         return 0
     urls = _pin_urls_for(kw)
@@ -775,7 +775,7 @@ def _pin_home_feed(kw, seen, out, max_add, note=None, scroll=10, wlog=150,
     if login:
         cmd += ["--wait-login", str(wlog)]          # headed -> login possible
     else:
-        cmd += ["--headless", "--allow-anon"]       # koi interruption nahi
+        cmd += ["--headless", "--allow-anon"]       # never blocks waiting for the user
     try:
         rw = subprocess.run(cmd, capture_output=True, text=True, timeout=520,
                             creationflags=_NO_WINDOW,
@@ -794,8 +794,8 @@ def _pin_home_feed(kw, seen, out, max_add, note=None, scroll=10, wlog=150,
                  f"{str(j.get('detail',''))[:120]} -> static feed fallback")
         return 0
     if not j.get("logged_in") and note is not None:
-        note("Pinterest: public pages se chal raha hai. Asli HOME feed chahiye to "
-             "ek baar login karo:  python pin_home_feed.py  (optional)")
+        note("Pinterest: running on public pages. For your REAL home feed log in "
+             "once:  python pin_home_feed.py  (optional)")
 
     added = 0
     for p in j.get("pins") or []:
@@ -828,14 +828,14 @@ def _pin_home_feed(kw, seen, out, max_add, note=None, scroll=10, wlog=150,
         })
         added += 1
     if note is not None:
-        note(f"pinterest playwright: {len(j.get('pins') or [])} pins mile, "
-             f"{added} naye candidates")
+        note(f"pinterest playwright: {len(j.get('pins') or [])} pins found, "
+             f"{added} new candidates")
     return added
 
 def search_pinterest(kw, min_res, colour, seen, out, pages=2, max_add=None, note=None):
     """Pinterest = Playwright (keyword search + ideas + home) -> static feeds -> API."""
     global _PIN_API_BLOCKED
-    # 1) Playwright: keyword search + ideas + home (bina login)
+    # 1) Playwright: keyword search + ideas + home (no login)
     added = 0
     scroll = 10 if not max_add else max(6, min(26, max_add // 5 + 6))
     try:
@@ -843,14 +843,14 @@ def search_pinterest(kw, min_res, colour, seen, out, pages=2, max_add=None, note
     except Exception as e:
         if note is not None:
             note(f"pinterest playwright error: {e}")
-    # 2) static public feeds (fallback / agar quota poori nahi hui)
+    # 2) static public feeds (fallback / when the quota is not filled yet)
     room = None if max_add is None else max_add - added
     if room is None or room > 0:
         feeds = _pin_feeds_for(kw)
         added += _pin_from_feed(kw, seen, out,
                                 feeds[:max(2, min(len(feeds), max(pages, 4)))],
                                 room, note=note)
-    # 3) official API (jab tak blocked nahi hua)
+    # 3) official API (until it stops being blocked)
     if not _PIN_API_BLOCKED:
         room = None if max_add is None else max_add - added
         if room is None or room > 0:
@@ -860,7 +860,7 @@ def search_pinterest(kw, min_res, colour, seen, out, pages=2, max_add=None, note
 
 def _search_pinterest_api(kw, min_res, colour, seen, out, pages=2, max_add=None, note=None):
     """https://developers.pinterest.com/docs/api/v5/search_partner_pins/
-    Restricted feature - abhi app ko access nahi. Licence: pinterest-content-license."""
+    Restricted feature - apps do not get access. Licence: pinterest-content-license."""
     global _PIN_API_BLOCKED
     tok = pin_token()
     if not tok:
@@ -872,13 +872,13 @@ def _search_pinterest_api(kw, min_res, colour, seen, out, pages=2, max_add=None,
     for page in range(1, pages + 1):
         params = {"term": kw, "country_code": "US", "limit": 50}
         if page > 1:
-            params["bookmark"] = ""      # bookmark pehle page se aata hai; niche handle
+            params["bookmark"] = ""      # bookmark comes from the previous page; handled below
         r = http_get(PIN_SEARCH, headers=hdrs, timeout=40, params=params)
         if not r:
-            _PIN_API_BLOCKED = True   # restricted feature / trial pending -> feed kaam karega
+            _PIN_API_BLOCKED = True   # restricted feature / trial pending -> the feed still works
             if note is not None:
                 note("pinterest official API blocked (restricted feature: pin_search) "
-                     "-> public feed se fetch kar raha hoon")
+                     "-> fetching from the public feed instead")
             return
         try:
             j = r.json()
@@ -893,7 +893,7 @@ def _search_pinterest_api(kw, min_res, colour, seen, out, pages=2, max_add=None,
                 break
             media = p.get("media") or {}
             imgs = media.get("images") or {}
-            # sabse bada available size chuno
+            # pick the largest available size
             cand = None
             for k in ("original", "800x", "600x", "400x", "prefilled"):
                 if imgs.get(k, {}).get("url"):
@@ -935,7 +935,7 @@ def _search_pinterest_api(kw, min_res, colour, seen, out, pages=2, max_add=None,
 
 # ---------------- job engine ----------------
 JOBS = {}
-JOB_QUEUE = threading.Lock()      # ek waqt me ek hi job -> API 429 nahi hote
+JOB_QUEUE = threading.Lock()      # one job at a time -> the APIs never 429
 
 class Job:
     def __init__(self, opts):
@@ -971,7 +971,7 @@ def analyse_items(job, items, colour, style, relaxed=False, cap=None, min_res=0,
         rr = dl_first(alt_urls(it["thumb"]), timeout=25, tries=1,
                       headers=src_headers(it["src"]))
         if not rr:
-            return None            # openverse 424 thumb = broken origin, skip (fast rahega)
+            return None            # openverse 424 thumb = broken origin, skip (keeps it fast)
         try:
             m = analyze_bytes(rr.content)
         except Exception:
@@ -1019,7 +1019,7 @@ def run_job(job):
         job.say("white + vivid contradictory -> style=any")
     target = int(o["count"])
     min_res = int(o["min_res"])
-    smart = bool(o.get("smart", True))   # default ON - missing key se crash mat ho
+    smart = bool(o.get("smart", True))   # default ON - do not crash on a missing key
     cat = "100" if o.get("category") == "general" else "111"
     source = o.get("source") or "wallhaven"
     if source not in ALL_SOURCES and source != "all":
@@ -1041,7 +1041,7 @@ def run_job(job):
     job.folder = folder
 
     seen_ids, hashes = set(), set()
-    saved_ids = set()               # kya-kya save hua (relaxed re-check me exclude)
+    saved_ids = set()               # what got saved (excluded during the relaxed re-check)
     mf = os.path.join(folder, "manifest.csv")
     old_rows = []
     if os.path.exists(mf):
@@ -1050,54 +1050,54 @@ def run_job(job):
                 old_rows.append(r)
                 if r.get("id"):
                     seen_ids.add(r["id"])
-                # visual dedupe: purani runs ke ahash seed karo, warna ek hi folder
-                # me baar baar chalane pe same image dobar aaati (alag source/id)
+                # visual dedupe: seed the ahashes of previous runs, otherwise filling
+                # one folder repeatedly brings the same image back (from another source/id)
                 if r.get("ahash"):
                     try:
                         hashes.add(int(r["ahash"], 16))
                     except Exception:
                         pass
     if old_rows:
-        job.say(f"Purani folder: {len(old_rows)} images -> unke IDs+hash skip kiye "
-                f"(nayi jagah hi save hoga)")
+        job.say(f"Existing folder: {len(old_rows)} images -> their IDs + hashes will be skipped "
+                f"(new downloads only, nothing is overwritten)")
 
     srcs = list(ALL_SOURCES) if source == "all" else [source]
     job.state = "searching"
     job.say(f"Searching: {', '.join(words)}  [{colour} / {style}] sources={'+'.join(srcs)}")
     if "pinterest" in srcs:
         if orient == "landscape":
-            job.say("NOTE: Pinterest ~90% PORTRAIT (phone wallpapers) hai "
-                    "-> landscape me iska yield lagbhag 0 hoga.")
+            job.say("NOTE: Pinterest is ~90% PORTRAIT (phone wallpapers) "
+                    "-> its yield in landscape mode is close to 0.")
         elif orient == "any":
-            job.say("Pinterest: portrait (phone) wallpapers dominate karte hain.")
-    # Bade target + landscape = bahut kam match (sources me portrait art/photos zyada)
+            job.say("Pinterest: portrait (phone) wallpapers dominate the results.")
+    # Big target + landscape = very few matches (sources hold mostly portrait art/photos)
     if target >= 300 and orient == "landscape":
         job.say(f"HEADS-UP: target={target} + Orientation=Landscape. Museum art "
-                "(ARTIC/CMA) aur Pinterest mostly PORTRAIT hain -> unka zyadatar "
-                "part reject hoga. Zyada chahiye to Orientation=Any chuno "
-                "(ya Portrait, phone wallpapers ke liye).")
+                "(ARTIC/CMA) and Pinterest are mostly PORTRAIT -> most of their "
+                "results will be rejected. For a higher yield pick Orientation=Any "
+                "(or Portrait, if you want phone wallpapers).")
 
     min_pool = max(target * 5, 180)
-    # fair-share quota per source - warna Wallhaven poora pool bhar deta hai
-    # aur baaki sources kabhi chalte hi nahi
+    # fair-share quota per source - otherwise Wallhaven fills the whole pool
+    # and the other sources never get used
     per_src = max(min_pool // len(srcs), 40)
 
-    # ---- search me min_res: EXACT rakho, sirf high-res pe dhilao ----
-    # (a) 2560 tak sources seedha exact min_res pe quota bhar lete hain (A/B test:
-    #     1920 pe wallhaven/commons/cma/nasa/artic sab = 500) - dhila rakhne se
-    #     1024-1920 px wale candidates aate jo save() me reject hote = time waste.
-    # (b) 4K (3840) pe sources SEEDHA 0 de dete hain (test: cma=0, wallhaven=16/87)
-    #     toh wahan hi pool badhane ke liye dhilao. Exact min_res save() me enforce hota hai.
+    # ---- min_res during search: keep it EXACT, only relax it for high-res ----
+    # (a) up to 2560 the sources fill their quota at the exact min_res anyway (A/B test:
+    #     at 1920 wallhaven/commons/cma/nasa/artic all return 500) - relaxing would let
+    #     1024-1920 px candidates through, only for save() to reject them = wasted time.
+    # (b) at 4K (3840) the sources return 0 immediately (test: cma=0, wallhaven=16/87),
+    #     so relaxing there is what grows the pool. save() still enforces the exact min_res.
     if min_res > 2560:
         search_min = max(1920, min_res // 2)
-        job.say(f"High-res {min_res}px -> search me {search_min}px "
-                f"(exact {min_res}px save() me enforce hoga, warna sources 0 de deti hain)")
+        job.say(f"High-res {min_res}px -> the search phase uses {search_min}px "
+                f"(exactly {min_res}px is enforced in save(), otherwise some sources return 0)")
     else:
         search_min = min_res
 
-    # ---- keyword expansion (bade target ke liye) ----
+    # ---- keyword expansion (only for big targets) ----
     # "sunflower field" -> "sunflower field", "sunflower", "field"
-    # Chhote target pe time waste na ho, isliye sirf bade counts pe.
+    # Only for big counts, so small runs do not waste time.
     terms = list(words)
     if target >= 300:
         for w in list(words):
@@ -1119,18 +1119,18 @@ def run_job(job):
 
     cands = []
     resume = {}                    # word -> next wallhaven page (phase-5 continuation)
-    # search ka time budget - warna bade target pe (7000) ghanton tak chalega
-    # aur user ko pata hi nahi chalta. Budget ke baad jo mila analyse hota hai.
+    # search time budget - otherwise a big target (7000) would run for hours
+    # without the user realising. Whatever was found by then gets analysed.
     search_deadline = time.time() + min(900, 120 + int(target) // 5)
 
     def have(s):
         return sum(1 for c in cands if c["src"] == s)
 
     # ---- TWO-PASS search ----
-    # PEHLE: tez sources (wallhaven/commons/artic/cma/nasa) = sab terms ke liye.
-    # BAAD ME: slow sources (pinterest = ~6 min browser, openverse = rate-limited).
-    # Warna pinterest term-1 me hi poora time budget kha leta tha aur keyword
-    # expansion (11 terms) kabhi chalta hi nahi - isliye sirf phrase search hota
+    # FIRST: fast sources (wallhaven/commons/artic/cma/nasa) for every term.
+    # LATER: slow sources (pinterest = ~6 min browser, openverse = rate-limited).
+    # Otherwise Pinterest eats the whole time budget on term 1 and keyword
+    # expansion (11 terms) never runs - only the plain phrase search happens
     # tha jisme wallhaven/commons/cma/nasa = 0 aate the.
     fast_srcs = [s for s in ("wallhaven", "commons", "artic", "cma", "nasa") if s in srcs]
     slow_srcs = [s for s in ("pinterest", "openverse") if s in srcs]
@@ -1172,9 +1172,9 @@ def run_job(job):
                              pages=max(2, -(-room // 45)), max_add=room,
                              note=job.say)
             job.counts["searched"] = len(cands)
-        # openverse LAST + page cap. Ye rate-limited hai (20/min, 200/day) toh
-        # bade page counts pe ghanton lag jaate hain. Max 2 pages per term - jitna
-        # banega; baaki budget ke andar tez sources already bhar chuke hote hain.
+        # openverse LAST + page cap. It is rate limited (20/min, 200/day), so
+        # big page counts take hours. Max 2 pages per term - take what you can;
+        # the fast sources already filled the rest of the budget.
         if "openverse" in slow_srcs and have("openverse") < per_src:
             room = per_src - have("openverse")
             search_openverse(w, search_min, None, seen_ids, cands,
@@ -1186,21 +1186,21 @@ def run_job(job):
 
     def budget_over():
         if target >= 300 and len(cands) >= min_pool:
-            job.say(f"Pool poora: {len(cands)} candidates -> aage analyse")
+            job.say(f"Pool full: {len(cands)} candidates -> starting analysis")
             return True
         if time.time() >= search_deadline:
-            job.say(f"Search budget khatam -> {len(cands)} candidates pe analyse "
-                    f"kar raha hoon (target {target})")
+            job.say(f"Search budget exhausted -> analysing {len(cands)} candidates "
+                    f"(target {target})")
             return True
         return False
 
-    # PASS 1: tez sources - sab terms (fast, ~30s me sab nikal aata hai)
+    # PASS 1: fast sources - all terms (everything comes back within ~30s)
     for w in terms:
         search_fast(w)
         if pool_full() or budget_over():
             break
-    # PASS 2: slow sources (pinterest browser + openverse rate-limit) - sirf
-    # tabhi jab abhi bhi candidates ki kami ho.
+    # PASS 2: slow sources (pinterest browser + openverse rate limit) - only
+    # when there are still not enough candidates.
     if have("pinterest") < per_src or have("openverse") < per_src:
         for w in terms:
             search_slow(w)
@@ -1211,7 +1211,7 @@ def run_job(job):
         by_src[c["src"]] = by_src.get(c["src"], 0) + 1
     job.say(f"Candidates: {len(cands)}  ({', '.join(f'{k}={v}' for k, v in sorted(by_src.items()))})")
     if not cands:
-        job.error = "Koi candidate nahi mila - keywords badal ke dekho (ya source badlo)"
+        job.error = "No candidates found - try different keywords (or a different source)"
         job.state = "error"
         return
 
@@ -1221,11 +1221,11 @@ def run_job(job):
     job.counts["matched"] = len(ok)
     job.say(f"Matched {len(ok)} (target {target})")
     if not ok:
-        job.error = "Colour/style filters ke saath kuch nahi mila - style ya colour badlo"
+        job.error = "Nothing matched the color/style filters - try another style or colour"
         job.state = "error"
         return
 
-    # ---------- phase 3: smart tag filter (wallhaven ke tags + title deny) ----------
+    # ---------- phase 3: smart tag filter (wallhaven tags + title deny-list) ----------
     top = ok[:min(len(ok), target * 3)]
     if smart:
         wh_top = [it for it in top if it["src"] == "wallhaven"]
@@ -1266,7 +1266,7 @@ def run_job(job):
     manifest = list(old_rows)
     seq = len(old_rows)
     lock = threading.Lock()
-    failed_dl = set()              # download fail hue ids (phase-5 me retry)
+    failed_dl = set()              # ids whose download failed (retried in phase 5)
 
     def save(it, relaxed=True):
         nonlocal seq
@@ -1297,7 +1297,7 @@ def run_job(job):
             for hh in hashes:
                 if (hh ^ h).bit_count() <= 6:
                     return None
-            # actual pixels se resolution bonus correct (ARTIC/NASA res metadata nahi dete)
+            # resolution bonus from actual pixels (ARTIC/NASA do not report resolution)
             sc = round(it["_score"] - res_bonus(it)
                        + res_bonus({"w": m["w"], "h": m["h"]}), 2)
             seq += 1
@@ -1315,7 +1315,7 @@ def run_job(job):
                    "complexity_edge": m["edge"], "dark_frac": m["dark"], "saturation": m["sat"],
                    "score": sc, "keywords": it["q"], "source": it["src"],
                    "license": it.get("license", ""), "landing": it["landing"], "id": it["id"],
-                   # ahash -> agle run me isi folder me cross-run dedupe (visual)
+                   # ahash -> visual cross-run dedupe when the same folder is filled again
                    "ahash": format(h, "x")}
             manifest.append(row)
             job.files.append({"name": name, "url": f"/img/{job.id}/{name}",
@@ -1334,7 +1334,7 @@ def run_job(job):
 
     # ---------- phase 5: shortfall? relaxed wave (resume + failed-download retry) ----------
     if job.counts["saved"] < target:
-        # (a) jo downloads 429/waqt ki wajah se fail hue the, unhe pehle retry
+        # (a) retry the downloads that failed earlier (429 / timeout) first
         with lock:
             retry = [it for it in ok if it["id"] in failed_dl]
         if retry:
@@ -1346,10 +1346,10 @@ def run_job(job):
                         break
     if job.counts["saved"] < target:
         job.say(f"Shortfall ({job.counts['saved']}/{target}) -> relaxed round...")
-        # (b1) purane candidates jo strict gate me reject hue the - ab relaxed se check
+        # (b1) old candidates rejected by the strict gate - re-check them under relaxed rules
         ok_ids = {it["id"] for it in ok} | saved_ids
         old_rej = [it for it in cands if it["id"] not in ok_ids]
-        # keyword broadening: "sunflower field" -> "sunflower", "field" bhi try
+        # keyword broadening: "sunflower field" -> also try "sunflower", "field"
         terms = []
         for w in words:
             terms.append(w)
@@ -1357,24 +1357,24 @@ def run_job(job):
             if len(parts) > 1:
                 terms.extend(parts)
         extra = []
-        # fair-share quota (phase-1 jaisa) - warna ek source sab kha jaata hai
+        # fair-share quota (same as phase 1) - otherwise one source eats everything
         per2 = max(target, 30)
 
         def have2(s, bag=None):
             b = extra if bag is None else bag
             return sum(1 for c in b if c["src"] == s)
 
-        # relaxed search ka bhi budget - warna 7000 target pe ghanton tak chalega
+        # the relaxed search gets a budget too - otherwise 7000 targets run for hours
         r_deadline = time.time() + min(600, 90 + int(target) // 6)
 
         def r_over():
             if time.time() >= r_deadline:
-                job.say(f"Relaxed search budget khatam -> {len(extra)} naye candidates")
+                job.say(f"Relaxed search budget exhausted -> {len(extra)} new candidates")
                 return True
             return all(have2(s) >= per2 for s in srcs)
 
-        # PASS 1: tez sources pehle (sab terms) - pinterest ~6 min leta hai,
-        # warna wo term-1 me hi budget kha jata tha.
+        # PASS 1: fast sources first (all terms) - pinterest takes ~6 min,
+        # otherwise it used up the budget on term 1.
         for w in terms:
             if "wallhaven" in srcs and have2("wallhaven") < per2:
                 sp = resume.get(w, 1)
@@ -1414,7 +1414,7 @@ def run_job(job):
                                      pages=2, max_add=min(per2 - have2("openverse"), 60))
                 if r_over():
                     break
-        job.say(f"relaxed: {len(old_rej)} purane rejected + {len(extra)} naye candidates")
+        job.say(f"relaxed: {len(old_rej)} previous rejects + {len(extra)} new candidates")
         ok2 = analyse_items(job, old_rej[:target * 4] + extra, colour, style,
                             relaxed=True, cap=target * 20, min_res=min_res,
                             orient=orient)
@@ -1425,11 +1425,11 @@ def run_job(job):
                 if job.counts["saved"] >= target:
                     break
     if job.counts["saved"] < target:
-        job.say(f"Note: {job.counts['saved']}/{target} mile - keywords/colour/source badal ke dekho")
+        job.say(f"Note: only {job.counts['saved']}/{target} found - try different keywords / colour / source")
 
     if manifest:
-        # fieldnames = sab rows ka UNION. Purani rows me 'ahash' nahi hota, nayi me
-        # hoti hai -> sirf manifest[0].keys() lene pe DictWriter crash karta.
+        # fieldnames = UNION of every row. Older rows have no 'ahash', newer ones
+        # do -> taking only manifest[0].keys() would make DictWriter crash.
         fields = list(manifest[0].keys())
         for row in manifest[1:]:
             for k in row:
@@ -1450,200 +1450,218 @@ PAGE = r"""<!doctype html>
 <title>Wallpaper Fetcher</title>
 <style>
 :root{
-  --bg:#0a0c0f; --card:#13171d; --card2:#181d24; --in:#0d1014;
-  --line:#222932; --line2:#2b333d;
-  --txt:#e7eaef; --txt2:#a8b1bd; --mut:#7b8593;
+  --bg:#0a0c10; --card:#12161c; --card2:#171c23; --in:#0c0f14;
+  --line:#212932; --line2:#2b343f;
+  --txt:#eef1f6; --txt2:#b8c1cd; --mut:#8a94a2;
   --acc:#ffd84d; --acc2:#ffb020; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
-  --r:14px;
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;
   background:
-    radial-gradient(1100px 520px at 85% -8%, rgba(255,216,77,.08), transparent 62%),
-    radial-gradient(820px 460px at -8% 12%, rgba(77,159,255,.055), transparent 62%),
+    radial-gradient(1200px 560px at 88% -10%, rgba(255,216,77,.10), transparent 62%),
+    radial-gradient(900px 480px at -10% 8%, rgba(120,150,255,.07), transparent 62%),
     var(--bg);
-  color:var(--txt);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+  color:var(--txt);font:15.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
   -webkit-font-smoothing:antialiased}
-code{font-family:Consolas,'Cascadia Code',monospace;font-size:.9em;background:#20262e;padding:1px 5px;border-radius:5px}
+code{font-family:Consolas,'Cascadia Code',monospace;background:#232a33;padding:1px 5px;border-radius:5px;font-size:.9em}
 
-/* ---------- top bar ---------- */
-.topbar{position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);
-  background:rgba(10,12,15,.82);border-bottom:1px solid var(--line)}
-.topbar .in{max-width:1480px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:14px}
-.logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:17px;
-  background:linear-gradient(140deg,var(--acc),var(--acc2));box-shadow:0 4px 16px rgba(255,216,77,.22)}
-.brand{font-size:16.5px;font-weight:650;letter-spacing:-.2px}
-.brand span{color:var(--acc)}
-.pill{font-size:11.5px;color:var(--txt2);background:var(--card2);border:1px solid var(--line);
-  padding:4px 10px;border-radius:99px;white-space:nowrap}
-.spacer{flex:1}
-.ghost{background:var(--card2);border:1px solid var(--line2);color:var(--txt);font-weight:550;
+/* ---------- top ---------- */
+.top{position:sticky;top:0;z-index:40;backdrop-filter:blur(16px);
+  background:rgba(10,12,16,.8);border-bottom:1px solid var(--line)}
+.top .in{max-width:1500px;margin:0 auto;padding:12px 22px;display:flex;align-items:center;gap:13px}
+.logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;
+  background:linear-gradient(140deg,var(--acc),var(--acc2));box-shadow:0 4px 18px rgba(255,216,77,.28)}
+.brand{font-size:17px;font-weight:700;letter-spacing:-.3px}
+.brand span{background:linear-gradient(100deg,var(--acc),var(--acc2));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.pill{font-size:12px;color:var(--txt2);background:var(--card2);border:1px solid var(--line);
+  padding:4px 11px;border-radius:99px;white-space:nowrap}
+.sf{flex:1}
+.ghost{background:var(--card2);border:1px solid var(--line2);color:var(--txt);font-weight:600;
   padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13.5px;transition:.14s;font-family:inherit}
-.ghost:hover{background:#222932;border-color:#39424e}
-.ghost.sm{padding:5px 11px;font-size:12.5px}
+.ghost:hover{background:#232b35;border-color:#3c4654}
+.ghost.sm{padding:5px 11px;font-size:12.5px;font-weight:550}
 
 /* ---------- layout ---------- */
-.layout{max-width:1480px;margin:0 auto;padding:20px 22px 60px;
-  display:grid;grid-template-columns:392px minmax(0,1fr);gap:18px;align-items:start}
-@media(max-width:1040px){.layout{grid-template-columns:1fr}}
+.layout{max-width:1500px;margin:0 auto;padding:18px 22px 56px;
+  display:grid;grid-template-columns:366px minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:1020px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px}
+.ctrl{position:sticky;top:62px;padding:17px}
+.stage{overflow:hidden}
 
-.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r)}
-.ctrl{position:sticky;top:66px;padding:18px;max-height:calc(100vh - 88px);overflow:auto}
-.ctrl::-webkit-scrollbar,.log::-webkit-scrollbar,.stageScroll::-webkit-scrollbar{width:9px;height:9px}
-.ctrl::-webkit-scrollbar-thumb,.log::-webkit-scrollbar-thumb,.stageScroll::-webkit-scrollbar-thumb{background:#2b333d;border-radius:9px}
-.stage{padding:0;overflow:hidden}
-
-h2{font-size:11px;letter-spacing:.9px;text-transform:uppercase;color:var(--mut);margin:0 0 8px;font-weight:600}
-.grp{margin-bottom:17px}
+h2{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);margin:0 0 7px;font-weight:700}
+.grp{margin-bottom:15px}
 .grp:last-child{margin-bottom:0}
+.row{display:grid;gap:11px}
+.row2{grid-template-columns:1fr 1fr}
 
 textarea,input[type=text],input[type=password],select{
   width:100%;background:var(--in);border:1px solid var(--line2);color:var(--txt);
-  padding:10px 12px;border-radius:10px;font-size:14.5px;font-family:inherit;transition:.14s}
-textarea{min-height:76px;resize:vertical;line-height:1.5}
+  padding:10px 12px;border-radius:10px;font-size:14.5px;font-family:inherit;transition:.15s}
+textarea{min-height:70px;resize:vertical;line-height:1.5}
 select{cursor:pointer;appearance:none;
-  background-image:linear-gradient(45deg,transparent 50%,#6d7683 50%),linear-gradient(135deg,#6d7683 50%,transparent 50%);
-  background-position:calc(100% - 17px) 18px,calc(100% - 12px) 18px;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
-textarea:focus,input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(255,216,77,.13)}
-textarea::placeholder,input::placeholder{color:#5d6674}
-.hint{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.45}
-.hint b{color:var(--txt2);font-weight:600}
+  background-image:linear-gradient(45deg,transparent 50%,#79838f 50%),linear-gradient(135deg,#79838f 50%,transparent 50%);
+  background-position:calc(100% - 16px) 17px,calc(100% - 11px) 17px;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+textarea:focus,input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(255,216,77,.14)}
+::placeholder{color:#626c7a}
 
-/* colour dots */
-.dots{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
-.dot{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.14);cursor:pointer;
-  padding:0;position:relative;transition:.14s;flex:none}
-.dot:hover{transform:scale(1.14)}
-.dot.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,216,77,.35);transform:scale(1.14)}
-.dotName{font-size:13px;color:var(--txt2);margin-left:5px;min-width:52px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{background:transparent;border:1px dashed #2f3844;color:var(--mut);font-size:12px;
+  padding:3px 9px;border-radius:99px;cursor:pointer;font-family:inherit;transition:.13s}
+.chip:hover{border-color:var(--acc);color:var(--acc);border-style:solid}
 
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.dots{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dot{width:24px;height:24px;border-radius:50%;border:2px solid rgba(255,255,255,.16);cursor:pointer;
+  padding:0;transition:.13s;flex:none}
+.dot:hover{transform:scale(1.18)}
+.dot.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,216,77,.4);transform:scale(1.18)}
+.hrow{display:flex;justify-content:space-between;align-items:baseline}
+.dotName{font-size:12px;color:var(--acc);font-weight:700;letter-spacing:.3px}
+
 .chk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--txt2);cursor:pointer;user-select:none}
 .chk input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer;margin:0}
 
-.go{width:100%;margin-top:19px;background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#171300;
-  font-weight:750;font-size:15.5px;padding:14px;border-radius:11px;cursor:pointer;font-family:inherit;
-  box-shadow:0 6px 22px rgba(255,216,77,.2);transition:.15s;letter-spacing:.2px}
-.go:hover{transform:translateY(-1px);box-shadow:0 9px 28px rgba(255,216,77,.3)}
+.go{width:100%;margin-top:17px;background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#171300;
+  font-weight:800;font-size:15.5px;padding:14px;border-radius:12px;cursor:pointer;font-family:inherit;
+  box-shadow:0 6px 24px rgba(255,216,77,.24);transition:.15s;letter-spacing:.2px}
+.go:hover{transform:translateY(-1px);box-shadow:0 10px 30px rgba(255,216,77,.34)}
 .go:active{transform:translateY(0)}
-.go:disabled{opacity:.42;cursor:not-allowed;transform:none;box-shadow:none}
+.go:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.hint{text-align:center;font-size:12.5px;color:var(--mut);margin-top:9px}
+#warn{display:block;color:var(--warn);margin-top:6px;font-size:12.5px;line-height:1.45}
 
-/* ---------- progress head ---------- */
-.phead{padding:17px 18px 15px;border-bottom:1px solid var(--line);background:var(--card2)}
-.steps{display:flex;gap:5px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+/* ---------- hero (idle) ---------- */
+.hero{position:relative}
+.heroIn{padding:30px 30px 20px;max-width:760px}
+.eyebrow{font-size:11.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--acc);
+  font-weight:700;margin-bottom:11px}
+h1{font-size:clamp(27px,3.4vw,40px);line-height:1.1;margin:0 0 12px;letter-spacing:-1.1px;font-weight:800}
+.grad{background:linear-gradient(100deg,#fff 8%,var(--acc) 58%,var(--acc2));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{color:var(--txt2);font-size:15.5px;margin:0 0 15px;max-width:640px}
+.masonry{padding:4px 30px 0;column-count:5;column-gap:9px}
+@media(max-width:1300px){.masonry{column-count:4}}
+@media(max-width:1020px){.masonry{column-count:3}.heroIn{padding:24px 20px 16px}.masonry{padding:4px 20px 0}}
+.masonry img{width:100%;display:block;border-radius:11px;margin-bottom:9px;
+  background:linear-gradient(135deg,#1b212a,#242c37);min-height:70px}
+.fade{position:absolute;inset:auto 0 0 0;height:130px;pointer-events:none;
+  background:linear-gradient(transparent,var(--card))}
+.shim{padding:22px 30px;color:var(--mut);font-size:13.5px}
+
+/* ---------- progress ---------- */
+.prog{padding:15px 18px;border-bottom:1px solid var(--line);background:var(--card2)}
+.steps{display:flex;gap:5px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .step{font-size:12px;color:var(--mut);background:var(--in);border:1px solid var(--line);
   padding:4px 11px;border-radius:99px;display:flex;align-items:center;gap:6px;transition:.2s}
-.step i{width:6px;height:6px;border-radius:50%;background:#3d4653;display:block;transition:.2s}
-.step.on{color:#171300;background:var(--acc);border-color:var(--acc);font-weight:650}
+.step i{width:6px;height:6px;border-radius:50%;background:#3d4653;display:block}
+.step.on{color:#171300;background:var(--acc);border-color:var(--acc);font-weight:700}
 .step.on i{background:#171300}
-.step.done{color:var(--ok);border-color:#285c3d;background:#12241a}
+.step.done{color:var(--ok);border-color:#2a6242;background:#11241a}
 .step.done i{background:var(--ok)}
-.arrow{color:#3d4653;font-size:12px}
-
+.arw{color:#3d4653;font-size:12px}
 .bar{height:7px;background:var(--in);border-radius:99px;overflow:hidden;border:1px solid var(--line)}
 .bar i{display:block;height:100%;width:0;border-radius:99px;
-  background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .5s ease}
+  background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .5s}
 .bar i.ok{background:linear-gradient(90deg,#34d399,#4ade80)}
-
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:13px}
-@media(max-width:620px){.stats{grid-template-columns:repeat(2,1fr)}}
-.st{background:var(--in);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
-.st u{display:block;font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--mut);
-  text-decoration:none;margin-bottom:2px}
-.st b{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
-.st b.hl{color:var(--acc)}
-.path{margin-top:11px;font:12px Consolas,'Cascadia Code',monospace;color:var(--ok);
-  word-break:break-all;display:flex;align-items:center;gap:8px}
+.srow{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:13.5px;color:var(--mut);align-items:center}
+.srow b{color:var(--txt);font-weight:700;font-variant-numeric:tabular-nums}
+.srow b.hl{color:var(--acc);font-size:15px}
+.path{font:12px Consolas,'Cascadia Code',monospace;color:var(--ok);word-break:break-all;
+  display:flex;gap:9px;align-items:center;margin-top:10px}
 .path span{flex:1;min-width:0}
 
 /* ---------- log ---------- */
-.logwrap{border-top:1px solid var(--line);padding:12px 18px 15px;background:var(--card)}
-.logHead{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.logwrap{border-bottom:1px solid var(--line);padding:12px 18px}
+.logHead{display:flex;align-items:center;gap:9px;margin-bottom:7px}
 .logHead h2{margin:0;flex:1}
-.log{font:11.8px/1.65 Consolas,'Cascadia Code',monospace;color:#94a0ad;background:var(--in);
-  border:1px solid var(--line);border-radius:9px;padding:9px 11px;height:132px;overflow:auto;
+.log{font:11.8px/1.6 Consolas,'Cascadia Code',monospace;color:#9aa6b3;background:var(--in);
+  border:1px solid var(--line);border-radius:10px;padding:9px 11px;height:128px;overflow:auto;
   white-space:pre-wrap;word-break:break-word}
-.log:empty:after{content:"yahan live progress aayega…";color:#4d5663}
-.log div{padding:0}
+.log:empty:after{content:"live progress will show up here…";color:#4e5765}
 .log .err{color:var(--err)}
 .log .ok{color:var(--ok)}
 
 /* ---------- results ---------- */
-.rhead{display:flex;align-items:center;gap:11px;padding:15px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rhead{display:flex;align-items:center;gap:11px;padding:14px 18px;flex-wrap:wrap}
 .rhead b{font-size:15px}
-.rhead .cnt{font-size:12.5px;color:var(--acc);font-weight:600;background:rgba(255,216,77,.1);
-  border:1px solid rgba(255,216,77,.22);padding:2px 9px;border-radius:99px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:11px;padding:16px 18px}
-@media(max-width:620px){.grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}}
-.t{position:relative;background:#000;border:1px solid var(--line);border-radius:11px;overflow:hidden;
+.cnt{font-size:12.5px;color:var(--acc);font-weight:700;background:rgba(255,216,77,.1);
+  border:1px solid rgba(255,216,77,.24);padding:2px 9px;border-radius:99px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:11px;padding:0 18px 16px}
+@media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:8px}}
+.t{position:relative;background:#000;border:1px solid var(--line);border-radius:12px;overflow:hidden;
   cursor:pointer;aspect-ratio:16/10;transition:.16s;display:block}
-.t img{width:100%;height:100%;object-fit:cover;display:block;transition:.25s}
-.t:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.5)}
-.t:hover img{transform:scale(1.05)}
-.t .ov{position:absolute;inset:auto 0 0 0;padding:22px 9px 8px;
-  background:linear-gradient(transparent,rgba(0,0,0,.9));opacity:0;transition:.16s}
+.t img{width:100%;height:100%;object-fit:cover;display:block;transition:.3s}
+.t:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,0,0,.55)}
+.t:hover img{transform:scale(1.06)}
+.ov{position:absolute;inset:auto 0 0 0;padding:24px 10px 9px;
+  background:linear-gradient(transparent,rgba(0,0,0,.92));opacity:0;transition:.16s}
 .t:hover .ov{opacity:1}
-.t .ov b{display:block;font-size:11.5px;color:#fff;font-weight:600;overflow:hidden;
+.ov b{display:block;font-size:11.5px;color:#fff;font-weight:600;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.t .ov em{font-style:normal;font-size:10.5px;color:#b9c2cd}
-.badge{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.72);backdrop-filter:blur(6px);
-  border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:1px 6px;font-size:10px;
-  color:#cfe0f5;font-weight:600;letter-spacing:.2px}
+.ov em{font-style:normal;font-size:10.5px;color:#c0c9d4}
+.bg{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.74);backdrop-filter:blur(6px);
+  border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:1px 6px;font-size:10px;
+  color:#d5e4f7;font-weight:700}
 .rfoot{padding:0 18px 16px;display:flex;justify-content:center}
-.empty{padding:46px 18px;text-align:center;color:var(--mut)}
-.empty .ic{font-size:34px;margin-bottom:9px;opacity:.7}
+.empty{padding:34px 18px;text-align:center;color:var(--mut);font-size:13.5px}
 
-/* ---------- details / footer ---------- */
-details{border-top:1px solid var(--line)}
-details summary{padding:12px 18px;cursor:pointer;font-size:13.5px;color:var(--txt2);list-style:none;
+/* ---------- details ---------- */
+details{border-top:1px solid var(--line);background:var(--card)}
+summary{padding:12px 18px;cursor:pointer;font-size:13.5px;color:var(--txt2);list-style:none;
   display:flex;align-items:center;gap:8px;user-select:none}
-details summary::-webkit-details-marker{display:none}
-details summary:hover{color:var(--txt)}
-details summary:before{content:"▸";color:var(--mut);font-size:11px;transition:.15s;display:inline-block}
+summary::-webkit-details-marker{display:none}
+summary:hover{color:var(--txt)}
+summary:before{content:"▸";color:var(--mut);font-size:11px;transition:.15s;display:inline-block}
 details[open] summary:before{transform:rotate(90deg)}
-.dbody{padding:0 18px 16px;font-size:13px;color:var(--txt2);line-height:1.65}
-.dbody p{margin:0 0 9px}.dbody p:last-child{margin:0}
-.dbody .note{color:var(--warn)}
+.dbody{padding:0 18px 15px;font-size:13.5px;color:var(--txt2);line-height:1.7}
+.dbody p{margin:0 0 10px}.dbody p:last-child{margin:0}
+.note{color:var(--warn)}
 .dbody a{color:#9ecbff}
 
-footer{max-width:1480px;margin:0 auto;padding:0 22px 40px;color:var(--mut);font-size:12.5px}
-footer .fin{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:4px 0}
-footer a{color:#9ecbff;text-decoration:none}
-footer a:hover{text-decoration:underline}
+footer{max-width:1500px;margin:0 auto;padding:0 22px 38px;color:var(--mut);font-size:12.5px}
+.ffin{border:1px solid var(--line);border-radius:16px;background:var(--card)}
 
-/* ---------- toast ---------- */
-#toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,140%);z-index:90;
-  background:#1b2028;border:1px solid var(--line2);color:var(--txt);padding:11px 18px;border-radius:11px;
-  font-size:13.5px;box-shadow:0 14px 40px rgba(0,0,0,.55);transition:transform .28s cubic-bezier(.2,.9,.3,1.4);
-  max-width:min(560px,92vw)}
+#toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,150%);z-index:90;
+  background:#1b2129;border:1px solid var(--line2);color:var(--txt);padding:11px 18px;border-radius:12px;
+  font-size:13.5px;box-shadow:0 16px 44px rgba(0,0,0,.6);transition:transform .28s cubic-bezier(.2,.9,.3,1.4);
+  max-width:min(580px,92vw)}
 #toast.show{transform:translate(-50%,0)}
 #toast.e{border-color:#6b2f2f;color:#ffb4b4}
-
 .hidden{display:none!important}
-@media(max-width:1040px){.ctrl{position:static;max-height:none}}
+.ctrl::-webkit-scrollbar,.log::-webkit-scrollbar{width:9px}
+.ctrl::-webkit-scrollbar-thumb,.log::-webkit-scrollbar-thumb{background:#2b333d;border-radius:9px}
+@media(max-width:1020px){.ctrl{position:static}}
 </style></head><body>
 
-<div class="topbar"><div class="in">
+<div class="top"><div class="in">
   <div class="logo">🖼️</div>
   <div class="brand">Wallpaper <span>Fetcher</span></div>
-  <span class="pill">7 free sources · keyless</span>
-  <span class="spacer"></span>
-  <button class="ghost sm" onclick="document.getElementById('srcCard').open=!document.getElementById('srcCard').open">Sources</button>
+  <span class="pill">7 free sources · no API keys</span>
+  <span class="sf"></span>
+  <button class="ghost sm" onclick="document.getElementById('srcCard').open=true;
+    document.getElementById('srcCard').scrollIntoView({behavior:'smooth'})">Sources</button>
 </div></div>
 
 <div class="layout">
-
-<!-- ============ CONTROLS ============ -->
 <aside class="panel ctrl">
+
   <div class="grp">
     <h2>Keywords</h2>
-    <textarea id="kw" placeholder="sunflower field, minimal pattern, ocean waves&#10;comma ya nayi line se alag karo"></textarea>
-    <div class="hint">Har keyword alag search term banta hai &rarr; zyada variety. <b>Comma</b> ya <b>Enter</b> se alag.</div>
+    <textarea id="kw" placeholder="sunflower field, minimal pattern, ocean waves"></textarea>
+    <div class="chips" id="chips">
+      <button class="chip" data-k="sunflower field">sunflower field</button>
+      <button class="chip" data-k="minimal pattern">minimal pattern</button>
+      <button class="chip" data-k="ocean waves">ocean waves</button>
+      <button class="chip" data-k="abstract 3d">abstract 3d</button>
+      <button class="chip" data-k="mountain fog">mountain fog</button>
+      <button class="chip" data-k="nebula">nebula</button>
+      <button class="chip" data-k="forest light">forest light</button>
+    </div>
   </div>
 
   <div class="grp">
-    <h2>Colour</h2>
+    <h2 class="hrow">Color <span class="dotName" id="dotName">Any</span></h2>
     <div class="dots" id="swatches">
       <button class="dot on" data-c="any" title="Any" style="background:conic-gradient(#ff5f6d,#ffc371,#7ee8fa,#a78bfa,#ff5f6d)"></button>
       <button class="dot" data-c="yellow" title="Yellow" style="background:#ffd84d"></button>
@@ -1658,38 +1676,22 @@ footer a:hover{text-decoration:underline}
       <button class="dot" data-c="white" title="White" style="background:#f5f5f0"></button>
       <button class="dot" data-c="grey" title="Grey" style="background:#9aa0a6"></button>
       <button class="dot" data-c="black" title="Black" style="background:#242424"></button>
-      <span class="dotName" id="dotName">Any</span>
     </div>
   </div>
 
-  <div class="grp g2">
-    <div>
-      <h2>Style</h2>
-      <select id="style">
-        <option value="soft">Light &amp; soft</option>
-        <option value="vivid">Vivid</option>
-        <option value="any">No filter</option>
-      </select>
-    </div>
-    <div>
-      <h2>Orientation</h2>
-      <select id="orient">
-        <option value="landscape">Landscape</option>
-        <option value="any">Any</option>
-        <option value="portrait">Portrait</option>
-      </select>
-    </div>
-    <div>
-      <h2>Count</h2>
-      <input type="text" id="count" value="50" inputmode="numeric">
-    </div>
-    <div>
-      <h2>Min res</h2>
-      <select id="minres">
-        <option value="1920">1920 px</option><option value="2560">2560 px</option>
-        <option value="3840">3840 px</option><option value="1280">1280 px</option>
-      </select>
-    </div>
+  <div class="grp row row2">
+    <div><h2>Style</h2><select id="style">
+      <option value="soft">Light &amp; soft</option>
+      <option value="vivid">Vivid</option>
+      <option value="any">No filter</option></select></div>
+    <div><h2>Orientation</h2><select id="orient">
+      <option value="landscape">Landscape</option>
+      <option value="any">Any</option>
+      <option value="portrait">Portrait</option></select></div>
+    <div><h2>Count</h2><input type="text" id="count" value="50" inputmode="numeric"></div>
+    <div><h2>Min resolution</h2><select id="minres">
+      <option value="1920">1920 px</option><option value="2560">2560 px</option>
+      <option value="3840">3840 px</option><option value="1280">1280 px</option></select></div>
   </div>
 
   <div class="grp">
@@ -1702,111 +1704,122 @@ footer a:hover{text-decoration:underline}
       <option value="artic">Art Institute of Chicago</option>
       <option value="cma">Cleveland Museum of Art</option>
       <option value="nasa">NASA Image Library</option>
-      <option value="pinterest">Pinterest — bina key</option>
+      <option value="pinterest">Pinterest — no key needed</option>
     </select>
   </div>
 
-  <div class="grp g2">
-    <div>
-      <h2>Category</h2>
-      <select id="cat">
-        <option value="general">General</option><option value="all">General + Anime</option>
-      </select>
-    </div>
-    <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:9px;padding-top:19px">
+  <div class="grp row row2">
+    <div><h2>Category</h2><select id="cat">
+      <option value="general">General</option><option value="all">General + Anime</option></select></div>
+    <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:9px;padding-top:20px">
       <label class="chk"><input type="checkbox" id="smart" checked> Smart filter</label>
-      <label class="chk"><input type="checkbox" id="newfolder" checked> Nayi folder</label>
+      <label class="chk"><input type="checkbox" id="newfolder" checked> New folder</label>
     </div>
   </div>
 
   <div class="grp">
-    <h2>Folder naam <span style="text-transform:none;letter-spacing:0;color:#5d6674">(optional)</span></h2>
-    <input type="text" id="folder" placeholder="auto: keywords se banega">
+    <h2>Folder name <span style="text-transform:none;letter-spacing:0;color:#626c7a;font-weight:500">(optional)</span></h2>
+    <input type="text" id="folder" placeholder="auto: generated from keywords">
   </div>
 
-  <button class="go" id="go" onclick="start()">⚡ Fetch karo</button>
-  <div class="hint" style="text-align:center;margin-top:9px">
-    <b>Ctrl + Enter</b> se bhi chalega
-    <span id="warn" style="display:block;color:var(--warn);margin-top:5px"></span>
-  </div>
+  <button class="go" id="go" onclick="start()">⚡ Fetch wallpapers</button>
+  <div class="hint">or press <b>Ctrl + Enter</b><span id="warn"></span></div>
 </aside>
 
-<!-- ============ STAGE ============ -->
 <section class="panel stage">
 
-  <div class="phead">
-    <div class="steps" id="steps">
-      <span class="step" data-s="searching"><i></i>Search</span><span class="arrow">→</span>
-      <span class="step" data-s="analysing"><i></i>Analyse</span><span class="arrow">→</span>
-      <span class="step" data-s="downloading"><i></i>Download</span><span class="arrow">→</span>
-      <span class="step" data-s="done"><i></i>Done</span>
+  <!-- ================= IDLE ================= -->
+  <div class="hero" id="idleBox">
+    <div class="heroIn">
+      <div class="eyebrow">7 free sources · no API keys</div>
+      <h1 class="grad">Fetch the wallpapers<br>you actually want.</h1>
+      <p class="lede">Type some keywords &rarr; the tool searches <b>7 free sources</b> &rarr;
+        applies color / resolution / tag filters &rarr; saves everything into a new folder with a
+        <code>manifest.csv</code> (source link + licence for every image).</p>
+      <div class="chips">
+        <span style="font-size:12.5px;color:var(--mut)">Enter keywords on the left, or click a chip above &rarr;</span>
+      </div>
     </div>
-    <div class="bar"><i id="fill"></i></div>
-    <div class="stats">
-      <div class="st"><u>Searched</u><b id="c1">0</b></div>
-      <div class="st"><u>Matched</u><b id="c3">0</b></div>
-      <div class="st"><u>Saved</u><b id="c4" class="hl">0</b></div>
-      <div class="st"><u>Target</u><b id="c5">0</b></div>
-    </div>
-    <div class="path"><span id="folderPath"></span>
-      <button class="ghost sm" onclick="openFolder()">📂 Kholo</button>
-      <button class="ghost sm" id="stopBtn" onclick="stopPoll()">Rok do</button>
-    </div>
-    <div style="font-size:12px;color:var(--mut);margin-top:6px">
-      <span id="phase">—</span> · <span id="elapsed">0s</span> · <span id="rate"></span>
-    </div>
+    <div class="shim" id="shim">loading sample wallpapers…</div>
+    <div class="masonry" id="samples"></div>
+    <div class="fade"></div>
   </div>
 
-  <div class="logwrap">
-    <div class="logHead"><h2>Live log</h2>
-      <button class="ghost sm" onclick="clearLog()">Clear</button></div>
-    <div class="log" id="log"></div>
-  </div>
-
-  <div id="res">
-    <div class="rhead">
-      <b>Saved</b><span class="cnt" id="resTitle">0</span>
-      <span style="flex:1"></span>
-      <button class="ghost sm" onclick="location.reload()">Naya fetch</button>
+  <!-- ================= RUNNING ================= -->
+  <div id="runBox" class="hidden">
+    <div class="prog">
+      <div class="steps" id="steps">
+        <span class="step" data-s="searching"><i></i>Search</span><span class="arw">→</span>
+        <span class="step" data-s="analysing"><i></i>Analyse</span><span class="arw">→</span>
+        <span class="step" data-s="downloading"><i></i>Download</span><span class="arw">→</span>
+        <span class="step" data-s="done"><i></i>Done</span>
+      </div>
+      <div class="bar"><i id="fill"></i></div>
+      <div class="srow">
+        <span>searched <b id="c1">0</b></span>
+        <span>matched <b id="c3">0</b></span>
+        <span>saved <b id="c4" class="hl">0</b> / <b id="c5">0</b></span>
+        <span style="margin-left:auto"><span id="phase">queued</span> · <span id="elapsed">0s</span>
+          <span id="rate"></span></span>
+      </div>
+      <div class="path"><span id="folderPath"></span>
+        <button class="ghost sm" onclick="openFolder()">📂 Open folder</button>
+        <button class="ghost sm" id="stopBtn" onclick="stopPoll()">Stop</button>
+      </div>
     </div>
-    <div class="grid" id="grid"></div>
-    <div class="empty hidden" id="empty"><div class="ic">🗂️</div>abhi kuch save nahi hua</div>
-    <div class="rfoot hidden" id="moreWrap">
-      <button class="ghost" id="moreBtn" onclick="renderMore()">Aur dikhao</button>
+
+    <div class="logwrap">
+      <div class="logHead"><h2>Live log</h2>
+        <button class="ghost sm" onclick="clearLog()">Clear</button></div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div id="res">
+      <div class="rhead"><b>Saved</b><span class="cnt" id="resTitle">0</span>
+        <span style="flex:1"></span>
+        <button class="ghost sm" onclick="location.reload()">New fetch</button></div>
+      <div class="grid" id="grid"></div>
+      <div class="empty hidden" id="empty">Nothing saved yet — thumbnails appear once the download phase starts</div>
+      <div class="rfoot hidden" id="moreWrap">
+        <button class="ghost" id="moreBtn" onclick="renderMore()">Show more</button></div>
     </div>
   </div>
 
   <details id="srcCard">
-    <summary>⚙️ Pinterest settings <span style="color:var(--mut)">(optional — bina key chalta hai ✅)</span></summary>
+    <summary>⚙️ Pinterest settings <span style="color:var(--mut)">(optional — works without a key ✅)</span></summary>
     <div class="dbody">
-      <div class="g2" style="margin-bottom:11px">
+      <div class="row row2" style="margin-bottom:11px">
         <div><h2>Client ID</h2><input type="text" id="pinId" placeholder="123456789012"></div>
         <div><h2>Client Secret</h2><input type="password" id="pinSec" placeholder="••••••••"></div>
-        <div style="grid-column:1/-1"><h2>Ya seedha access token</h2><input type="text" id="pinTok" placeholder="pinc... / pina..."></div>
+        <div style="grid-column:1/-1"><h2>Or paste an access token</h2><input type="text" id="pinTok" placeholder="pinc... / pina..."></div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button class="ghost sm" onclick="pinSave()">💾 Save + token banao</button>
+        <button class="ghost sm" onclick="pinSave()">💾 Save + generate token</button>
         <span id="pinMsg" style="font-size:12.5px;color:var(--mut)"></span>
       </div>
-      <p style="margin-top:12px"><b>Pinterest ye card ke bina chalta hai</b> — tool apna Chromium (Playwright)
-        chalata hai aur <b>asli keyword search</b> (<code>/search/pins/?q=…</code>) + <code>/ideas/</code> +
-        home feed + public category feeds se images nikalta hai. <b>Na login, na key.</b></p>
-      <p><b>Personalized feed chahiye</b> to <code>pinterest-session.bat</code> double-click karo
-        (Chrome band &rarr; ENTER). Uske baad asli home feed + har pin ki real link/title milte hain.</p>
-      <p class="note">Bina login ke title/tag filters (food/text/logo deny) lagu nahi hote. Licence =
-        pinterest-content-license (personal use only). Pinterest <b>~90% portrait</b> deta hai &rarr;
-        landscape + Pinterest ≈ 0 yield.</p>
-      <p>Official API se search <b>restricted feature</b> hai — app ko milta hi nahi (401 consumer type /
-        402 sandbox). Ye card sirf tab kaam aayega jab approval mil jaye.</p>
+      <p style="margin-top:12px"><b>Pinterest works without this card</b> — the tool drives its own
+        Chromium (Playwright) instance and pulls images from the <b>real keyword search</b>
+        (<code>/search/pins/?q=…</code>), <code>/ideas/</code>, the home feed and the public category
+        feeds. <b>No login, no key required.</b></p>
+      <p><b>Want your personalized feed?</b> Run <code>pinterest-session.bat</code> once
+        (close Chrome first &rarr; press ENTER). From then on the real home feed and each pin's
+        actual link/title are picked up automatically.</p>
+      <p class="note">Without a login the title/tag filters (food / text / logo deny-lists) do not
+        apply, because alt text comes back empty. Licence = pinterest-content-license
+        (personal use only). Pinterest returns <b>~90% portrait</b> images &rarr; combining
+        <b>landscape + Pinterest ≈ 0 results</b>.</p>
+      <p>Searching through the official API is a <b>restricted feature</b> — apps simply do not get
+        access (401 consumer type / 402 sandbox). This card only becomes useful once Pinterest
+        approves the app.</p>
     </div>
   </details>
 
 </section>
 </div>
 
-<footer><div class="fin">
-  <details open>
-    <summary>🔗 Sources — 7 free options (sab keyless)</summary>
+<footer><div class="ffin">
+  <details>
+    <summary>🔗 Sources — 7 free options (all keyless)</summary>
     <div class="dbody">
       <p>• <a href="https://wallhaven.cc/api-docs" target="_blank">Wallhaven API</a> — free wallpaper API<br>
          • <a href="https://api.openverse.org/" target="_blank">Openverse API</a> — CC-licensed images (WordPress)<br>
@@ -1814,10 +1827,11 @@ footer a:hover{text-decoration:underline}
          • <a href="https://api.artic.edu/docs/" target="_blank">Art Institute of Chicago API</a> — public-domain art, IIIF<br>
          • <a href="https://github.com/clevelandart/api" target="_blank">Cleveland Museum of Art API</a> — CC0 collection<br>
          • <a href="https://images.nasa.gov/" target="_blank">NASA Image Library API</a> — public-domain space imagery<br>
-         • <b>Pinterest</b> — <b>Playwright browser</b> se asli keyword search (bina login/key; official
-           <a href="https://developers.pinterest.com/docs/api/v5/search_partner_pins/" target="_blank">search API</a> = restricted)</p>
-      <p>Har wallpaper ka original link + licence <code>manifest.csv</code> me save hota hai.
-         Best quality ranking: 4K (+14) &gt; 2K (+9) &gt; 1080p (+4), landscape default.</p>
+         • <b>Pinterest</b> — real keyword search driven through a <b>Playwright browser</b> (no login/key;
+           the official <a href="https://developers.pinterest.com/docs/api/v5/search_partner_pins/" target="_blank">search API</a>
+           is a restricted feature)</p>
+      <p>Every wallpaper's original link and licence are written to <code>manifest.csv</code>.
+         Quality ranking: 4K (+14) &gt; 2K (+9) &gt; 1080p (+4), landscape by default.</p>
     </div>
   </details>
 </div></footer>
@@ -1828,193 +1842,171 @@ footer a:hover{text-decoration:underline}
 const $=id=>document.getElementById(id);
 let job=null,timer=null,colour='any',shown=0,rendered=new Set(),lastLogLen=0;
 const MAXPAGE=150;
-const COLOURNAME={any:'Any',yellow:'Yellow',gold:'Gold',orange:'Orange',red:'Red',pink:'Pink',
+const CN={any:'Any',yellow:'Yellow',gold:'Gold',orange:'Orange',red:'Red',pink:'Pink',
   purple:'Purple',blue:'Blue',teal:'Teal',green:'Green',white:'White',grey:'Grey',black:'Black'};
 let files=[];
 
-/* ---------- toast ---------- */
 let tT=null;
-function toast(msg,isErr){
-  const t=$('toast'); t.textContent=msg; t.className=isErr?'e show':'show';
-  clearTimeout(tT); tT=setTimeout(()=>t.classList.remove('show'),isErr?5200:2600);
-}
+function toast(m,e){const t=$('toast');t.textContent=m;t.className=e?'e show':'show';
+  clearTimeout(tT);tT=setTimeout(()=>t.classList.remove('show'),e?5200:2600);}
 function clearLog(){$('log').innerHTML='';lastLogLen=0;}
 
-/* ---------- colour dots ---------- */
+/* ---------- sample wallpapers (keeps the idle screen alive) ---------- */
+async function loadSamples(){
+  try{
+    const j=await(await fetch('/api/samples')).json();
+    const sh=$('shim');
+    if(!j.items||!j.items.length){ if(sh)sh.remove(); return; }
+    $('samples').innerHTML=j.items.map(s=>
+      `<img loading="lazy" src="${s.url}" alt="" onerror="this.remove()">`).join('');
+    if(sh)sh.remove();
+  }catch(e){const sh=$('shim'); if(sh)sh.remove();}
+}
+loadSamples();
+
+/* ---------- keyword chips ---------- */
+$('chips').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  const cur=$('kw').value.trim();
+  $('kw').value = cur ? (cur.replace(/,\s*$/,'')+', '+b.dataset.k) : b.dataset.k;
+  $('kw').focus(); save(); warnCheck();
+});
+
+/* ---------- color dots ---------- */
 $('swatches').addEventListener('click',e=>{
   const b=e.target.closest('.dot'); if(!b) return;
   document.querySelectorAll('.dot').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); colour=b.dataset.c;
-  $('dotName').textContent=COLOURNAME[colour]||colour;
-  save();
+  $('dotName').textContent=CN[colour]||colour; save();
 });
 
-/* ---------- persistence ---------- */
-function save(){
-  try{localStorage.setItem('wf',JSON.stringify({
-    kw:$('kw').value, colour, style:$('style').value, orient:$('orient').value,
-    count:$('count').value, minres:$('minres').value, source:$('source').value,
-    cat:$('cat').value, smart:$('smart').checked, newfolder:$('newfolder').checked,
-    folder:$('folder').value}))}catch(e){}
-}
-function load(){
-  try{const d=JSON.parse(localStorage.getItem('wf')||'{}');
-    if(d.kw)$('kw').value=d.kw;
-    if(d.colour){colour=d.colour;
-      document.querySelectorAll('.dot').forEach(x=>x.classList.toggle('on',x.dataset.c===colour));
-      $('dotName').textContent=COLOURNAME[colour]||colour;}
-    ['style','orient','count','minres','source','cat','folder'].forEach(k=>{if(d[k]!==undefined&&d[k]!=='')$(k).value=d[k];});
-    if(d.smart!==undefined)$('smart').checked=d.smart;
-    if(d.newfolder!==undefined)$('newfolder').checked=d.newfolder;
-  }catch(e){}
-  warnCheck();
-}
+/* ---------- settings persistence ---------- */
+function save(){try{localStorage.setItem('wf',JSON.stringify({
+  kw:$('kw').value,colour,style:$('style').value,orient:$('orient').value,count:$('count').value,
+  minres:$('minres').value,source:$('source').value,cat:$('cat').value,
+  smart:$('smart').checked,newfolder:$('newfolder').checked,folder:$('folder').value}))}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem('wf')||'{}');
+  if(d.kw)$('kw').value=d.kw;
+  if(d.colour){colour=d.colour;
+    document.querySelectorAll('.dot').forEach(x=>x.classList.toggle('on',x.dataset.c===colour));
+    $('dotName').textContent=CN[colour]||colour;}
+  ['style','orient','count','minres','source','cat','folder'].forEach(k=>{if(d[k]!==undefined&&d[k]!=='')$(k).value=d[k];});
+  if(d.smart!==undefined)$('smart').checked=d.smart;
+  if(d.newfolder!==undefined)$('newfolder').checked=d.newfolder;
+}catch(e){} warnCheck();}
 ['kw','style','orient','count','minres','source','cat','folder','smart','newfolder']
   .forEach(k=>$(k).addEventListener('change',()=>{save();warnCheck();}));
-$('kw').addEventListener('input',save);
+$('kw').addEventListener('input',()=>{save();warnCheck();});
 
-/* ---------- live warning (bade count + landscape) ---------- */
+/* ---------- live warnings for combinations that yield almost nothing ---------- */
 function warnCheck(){
-  const n=parseInt($('count').value)||0, o=$('orient').value, s=$('source').value;
-  let w=[];
-  if(n>=300&&o==='landscape') w.push('Landscape + bade count = portrait sources (Pinterest/museum art) bahut kam milenge. Orientation "Any" karo.');
-  if(n>=1000&&o!=='any') w.push('1000+ ke liye Orientation "Any" better hai.');
-  if(n>=500&&s==='openverse') w.push('Openverse anon quota 200/day hai — 500+ nahi milenge.');
-  if(o==='landscape'&&s==='pinterest') w.push('Pinterest ≈90% portrait hai — landscape pe ~0 result.');
-  $('warn').innerHTML=w.join('<br>');
+  const n=parseInt($('count').value)||0,o=$('orient').value,s=$('source').value;let w=[];
+  if(n>=300&&o==='landscape')w.push('Landscape + a high count → portrait sources (Pinterest, museum art) will barely contribute.');
+  if(n>=1000&&o!=='any')w.push('For 1000+ results, Orientation "Any" works best.');
+  if(n>=500&&s==='openverse')w.push('Openverse anonymous quota is 200/day — you will not get 500+ from it.');
+  if(o==='landscape'&&s==='pinterest')w.push('Pinterest returns ~90% portrait → landscape yields ~0 results.');
+  $('warn').textContent=w.join(' ');
 }
 
-/* ---------- stepper ---------- */
 const ORDER=['queued','searching','analysing','downloading','done'];
-function setSteps(state){
-  let idx=ORDER.indexOf(state); if(idx<0)idx=0;
+function setSteps(state){let idx=ORDER.indexOf(state);if(idx<0)idx=0;
   if(state==='error')idx=1;
-  document.querySelectorAll('#steps .step').forEach(el=>{
-    const s=ORDER.indexOf(el.dataset.s);
-    el.classList.toggle('on', s===idx && state!=='done');
-    el.classList.toggle('done', s<idx || state==='done');
-  });
-}
+  document.querySelectorAll('#steps .step').forEach(el=>{const s=ORDER.indexOf(el.dataset.s);
+    el.classList.toggle('on',s===idx&&state!=='done');
+    el.classList.toggle('done',s<idx||state==='done');});}
 
-/* ---------- start ---------- */
 async function start(){
   const kw=$('kw').value.trim();
-  if(!kw){toast('Pehle keywords daalo',true);$('kw').focus();return;}
-  const body={keywords:kw,count:parseInt($('count').value)||50,colour,
-    style:$('style').value,source:$('source').value,orientation:$('orient').value,
-    min_res:parseInt($('minres').value),category:$('cat').value,
-    smart:$('smart').checked,newfolder:$('newfolder').checked,folder:$('folder').value};
+  if(!kw){toast('Enter some keywords first',true);$('kw').focus();return;}
+  const body={keywords:kw,count:parseInt($('count').value)||50,colour,style:$('style').value,
+    source:$('source').value,orientation:$('orient').value,min_res:parseInt($('minres').value),
+    category:$('cat').value,smart:$('smart').checked,newfolder:$('newfolder').checked,folder:$('folder').value};
   save();
   $('go').disabled=true;
+  $('idleBox').classList.add('hidden');
+  $('runBox').classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
   files=[];rendered=new Set();shown=0;lastLogLen=0;
   $('grid').innerHTML='';$('log').innerHTML='';$('moreWrap').classList.add('hidden');
   $('empty').classList.remove('hidden');$('resTitle').textContent='0';
   $('fill').classList.remove('ok');$('fill').style.width='0%';
-  setSteps('queued');
-  const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)});
+  $('stopBtn').textContent='Stop';setSteps('queued');
+  const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(j.error){toast(j.error,true);$('go').disabled=false;return;}
   job=j.job;timer=setInterval(poll,1000);poll();
 }
 
-/* ---------- poll ---------- */
 async function poll(){
-  if(!job)return;
-  let s;
-  try{const r=await fetch('/api/status?job='+job);s=await r.json();}
-  catch(e){return;}
+  if(!job)return;let s;
+  try{const r=await fetch('/api/status?job='+job);s=await r.json();}catch(e){return;}
   setSteps(s.state);
   $('phase').textContent=s.state;
   const c=s.counts,tgt=Math.max(c.target,1);
-  const pct=Math.min(100,100*c.saved/tgt);
-  $('fill').style.width=pct+'%';
+  $('fill').style.width=Math.min(100,100*c.saved/tgt)+'%';
   $('c1').textContent=c.searched;$('c3').textContent=c.matched;
   $('c4').textContent=c.saved;$('c5').textContent=c.target;
   $('elapsed').textContent=s.elapsed+'s';
   const mins=s.elapsed/60;
-  $('rate').textContent = (s.state==='downloading'&&mins>0.3)
-    ? (c.saved/mins).toFixed(0)+' img/min' : '';
-  $('folderPath').textContent=s.folder||'';
-  $('folderPath').title=s.folder||'';
+  $('rate').textContent=(s.state==='downloading'&&mins>0.3)?' · '+(c.saved/mins).toFixed(0)+' img/min':'';
+  $('folderPath').textContent=s.folder||'';$('folderPath').title=s.folder||'';
 
-  /* log - sirf naya append karo (scroll jump nahi) */
   const L=s.log||[];
   if(L.length!==lastLogLen){
     const lg=$('log');
     if(L.length<lastLogLen){lg.innerHTML='';lastLogLen=0;}
-    const near = lg.scrollHeight-lg.scrollTop-lg.clientHeight < 40;
-    for(let i=lastLogLen;i<L.length;i++){
-      const d=document.createElement('div');
-      const txt=L[i];
-      d.className = /error|fail|skip|removed/i.test(txt)?'err' : /done|saved|match/i.test(txt)?'ok':'';
-      d.textContent=txt; lg.appendChild(d);
-    }
+    const near=lg.scrollHeight-lg.scrollTop-lg.clientHeight<40;
+    for(let i=lastLogLen;i<L.length;i++){const d=document.createElement('div');
+      d.className=/error|fail|skip|removed/i.test(L[i])?'err':/done|saved|match/i.test(L[i])?'ok':'';
+      d.textContent=L[i];lg.appendChild(d);}
     lastLogLen=L.length;
     while(lg.children.length>400)lg.removeChild(lg.firstChild);
     if(near)lg.scrollTop=lg.scrollHeight;
   }
 
-  /* files - sirf naye append karo (rebuild nahi) */
-  if(s.files&&s.files.length){
-    let got=false;
-    for(const f of s.files){ if(!rendered.has(f.name)){ rendered.add(f.name); files.push(f); got=true; } }
-    if(got){$('resTitle').textContent=files.length;$('empty').classList.add('hidden');renderMore();}
-  }
+  if(s.files&&s.files.length){let got=false;
+    for(const f of s.files){if(!rendered.has(f.name)){rendered.add(f.name);files.push(f);got=true;}}
+    if(got){$('resTitle').textContent=files.length;$('empty').classList.add('hidden');renderMore();}}
 
   if(s.state==='done'||s.state==='error'){
     clearInterval(timer);timer=null;$('go').disabled=false;
-    if(s.state==='error'){toast('Error: '+s.error,true);}
+    if(s.state==='error')toast('Error: '+s.error,true);
     else{$('fill').style.width='100%';$('fill').classList.add('ok');
-      toast('Ho gaya — '+c.saved+' wallpapers · '+(s.folder||''));}
+      toast('Done — '+c.saved+' wallpapers saved · '+(s.folder||''));}
   }
 }
 
 function renderMore(){
-  const g=$('grid');
-  const end=Math.min(files.length,shown+MAXPAGE);
-  let html='';
-  for(let i=shown;i<end;i++){
-    const f=files[i];
+  const g=$('grid'),end=Math.min(files.length,shown+MAXPAGE);let html='';
+  for(let i=shown;i<end;i++){const f=files[i];
     html+=`<a class="t" href="${f.url}" target="_blank" title="${f.name}">
       <img loading="lazy" src="${f.url}" alt="">
-      <span class="badge">${f.src||''}</span>
-      <span class="ov"><b>${f.name}</b><em>${f.res||''} · score ${f.score??''} · ${f.license||''}</em></span></a>`;
-  }
-  g.insertAdjacentHTML('beforeend',html);
-  shown=end;
+      <span class="bg">${f.src||''}</span>
+      <span class="ov"><b>${f.name}</b><em>${f.res||''} · score ${f.score??''} · ${f.license||''}</em></span></a>`;}
+  g.insertAdjacentHTML('beforeend',html);shown=end;
   $('moreWrap').classList.toggle('hidden',shown>=files.length);
-  if(files.length>shown)$('moreBtn').textContent='Aur dikhao ('+(files.length-shown)+' baaki)';
+  if(files.length>shown)$('moreBtn').textContent='Show more ('+(files.length-shown)+' left)';
 }
 
-function stopPoll(){
-  if(timer){clearInterval(timer);timer=null;}
-  $('go').disabled=false;$('stopBtn').textContent='Rok diya';
-  toast('Polling rok diya (server pe chal raha job nahi ruka — alag cheez hai)');
-}
+function stopPoll(){if(timer){clearInterval(timer);timer=null;}
+  $('go').disabled=false;$('stopBtn').textContent='Stopped';
+  toast('Preview polling stopped — the job keeps running on the server');}
 async function openFolder(){if(job)await fetch('/api/open',{method:'POST',
   headers:{'Content-Type':'application/json'},body:JSON.stringify({job})});}
 
-/* ---------- pinterest ---------- */
-async function pinSave(){
-  const m=$('pinMsg');m.textContent='saving...';m.style.color='var(--mut)';
+async function pinSave(){const m=$('pinMsg');m.textContent='saving…';m.style.color='var(--mut)';
   const r=await fetch('/api/pinterest',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({client_id:$('pinId').value.trim(),client_secret:$('pinSec').value.trim(),
       access_token:$('pinTok').value.trim()})});
-  const j=await r.json();
-  m.style.color=j.error?'var(--err)':'var(--ok)';
-  m.textContent=j.error?j.error:(j.token?'OK - token ban gaya ('+j.token.slice(0,12)+'...)':j.msg);
-}
-async function pinLoad(){
-  try{const j=await(await fetch('/api/pinterest')).json();
-    $('pinId').value=j.client_id||'';
-    $('pinTok').value=j.access_token?'(saved)':'';
-    if(j.token)$('pinMsg').textContent='token active: '+j.token.slice(0,14)+'...';
-  }catch(e){}
-}
+  const j=await r.json();m.style.color=j.error?'var(--err)':'var(--ok)';
+  m.textContent=j.error?j.error:(j.token?'OK — token created ('+j.token.slice(0,12)+'…)':j.msg);}
+async function pinLoad(){try{const j=await(await fetch('/api/pinterest')).json();
+  $('pinId').value=j.client_id||'';$('pinTok').value=j.access_token?'(saved)':'';
+  if(j.token)$('pinMsg').textContent='token active: '+j.token.slice(0,14)+'…';}catch(e){}}
 $('kw').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();start();}});
 load();pinLoad();
 </script></body></html>"""
+
 
 
 @app.route("/")
@@ -2025,24 +2017,24 @@ def index():
 def api_start():
     o = request.get_json(force=True)
     try:
-        # Pehle yahan 500 ka hard cap tha -> user 7000 maangta to chupke se 500
-        # ban jaata aur "7000 me se 127" jaisa confusion hota. Ab 10000 tak allowed.
-        # (Realistic yield keywords+source+filters pe depend karta hai - log me dikhta hai.)
+        # There used to be a hard 500 cap here -> asking for 7000 silently returned
+        # 500, which is what caused the "127 out of 7000" confusion. 10000 is allowed now.
+        # (Realistic yield still depends on keywords + source + filters - see the log.)
         o["count"] = max(1, min(10000, int(o.get("count", 50))))
         o["min_res"] = int(o.get("min_res", 1920))
     except Exception:
-        return jsonify({"error": "count/resolution galat hai"}), 400
+        return jsonify({"error": "invalid count / resolution"}), 400
     job = Job(o)
     JOBS[job.id] = job
 
     def _run(j):
         try:
             if JOB_QUEUE.locked():
-                j.say("Doosri job chal rahi hai - queue me wait...")
+                j.say("Another job is running - waiting in queue...")
                 j.state = "queued"
-            with JOB_QUEUE:                 # ek-ek karke -> rate-limit nahi
+            with JOB_QUEUE:                 # one at a time -> no rate limits
                 run_job(j)
-        except Exception as e:          # koi bhi crash ho to page par dikhe
+        except Exception as e:          # any crash must surface on the page
             j.error = f"{type(e).__name__}: {e}"
             j.state = "error"
 
@@ -2053,7 +2045,7 @@ def api_start():
 def api_status():
     j = JOBS.get(request.args.get("job"))
     if not j:
-        return jsonify({"error": "job nahi mila"}), 404
+        return jsonify({"error": "job not found"}), 404
     return jsonify(j.status())
 
 @app.route("/img/<jobid>/<name>")
@@ -2068,7 +2060,7 @@ def img(jobid, name):
 
 @app.route("/api/pinterest", methods=["GET", "POST"])
 def api_pinterest():
-    """Pinterest app credentials save/load (sirf yeh source key maangta hai)."""
+    """Pinterest app credentials save/load (only this source asks for a key)."""
     if request.method == "POST":
         o = request.get_json(force=True) or {}
         cfg = pin_load_cfg()
@@ -2079,7 +2071,7 @@ def api_pinterest():
                 cfg[k] = v
                 changed = True
         if not changed:
-            return jsonify({"error": "kuch daalo (client_id / secret / token)"}), 400
+            return jsonify({"error": "enter something (client_id / secret / token)"}), 400
         try:
             with open(PIN_CFG, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -2087,11 +2079,11 @@ def api_pinterest():
             return jsonify({"error": f"save fail: {e}"}), 500
         _PIN.update(tok="", exp=0.0)        # cache reset -> naya token laao
         global _PIN_API_BLOCKED
-        _PIN_API_BLOCKED = False            # naya token -> API ek baar try karo
+        _PIN_API_BLOCKED = False            # new token -> try the API once
         tok = pin_token()
         if tok:
             return jsonify({"token": tok[:16] + "...", "msg": "saved"})
-        return jsonify({"msg": "saved (token baad me banega - 2FA/app access check karo)"})
+        return jsonify({"msg": "saved (token will be created later - check 2FA / app access)"})
     cfg = pin_load_cfg()
     return jsonify({"client_id": cfg.get("client_id", ""),
                     "access_token": (cfg.get("access_token") or "")[:16] + "..."
@@ -2105,7 +2097,42 @@ def api_open():
         os.startfile(j.folder)
     return jsonify({"ok": True})
 
+# --- idle-state demo grid: shows what the tool actually does ---
+_SAMPLE = {"t": 0.0, "items": []}
+
+@app.route("/api/samples")
+def api_samples():
+    """Keeps the UI showing wallpapers even while idle.
+
+    Without it the right-hand side was just a black empty area. On load a few
+    real wallpapers come in (26) so the user immediately sees what the tool
+    will fetch. Cached for 30 min so the network is not hit every time.
+    """
+    now = time.time()
+    if _SAMPLE["items"] and now - _SAMPLE["t"] < 1800:
+        return jsonify({"items": _SAMPLE["items"]})
+    kws = ["sunflower", "minimal pattern", "ocean", "abstract", "mountain",
+           "nebula", "forest", "architecture"]
+    out, seen = [], set()
+    for kw in kws:
+        if len(out) >= 26:
+            break
+        for fn in (
+            lambda: search_wallhaven(kw, "111", 1920, "any", False, 1, seen, out,
+                                     pacing=0.2, max_add=5),
+            lambda: search_nasa(kw, 1920, seen, out, pages=1, max_add=2),
+        ):
+            try:
+                fn()
+            except Exception:
+                pass
+    items = [{"url": it["thumb"], "src": it.get("src", ""),
+              "w": it.get("w", 0), "h": it.get("h", 0)}
+             for it in out[:26] if it.get("thumb")]
+    _SAMPLE.update(t=now, items=items)
+    return jsonify({"items": items})
+
 if __name__ == "__main__":
     threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
-    print(f"\n  Wallpaper Fetcher chal raha hai ->  http://127.0.0.1:{PORT}\n")
+    print(f"\n  Wallpaper Fetcher is running ->  http://127.0.0.1:{PORT}\n")
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)

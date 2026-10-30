@@ -1,12 +1,12 @@
-"""Manifest repair: disk pe maujood images jo manifest me NAHI hain unhe add karo.
+"""Manifest repair: add any image that exists on disk but is missing from manifest.csv.
 
-Kyun zaroori: run 2 17:16 pe kill ho gaya (server mar gaya) -> uski 585 images
-disk pe hain par manifest me nahi. Isse do problem hoti:
-  * agla run seq = len(old_rows) = 2000 leta -> nature-2001.jpg par DOBARA likhta
-    (purani 585 files overwrite) 
-  * unka ahash/ID skip nahi hota -> visual duplicate bante
-Id/source to kho chuka hai (manifest hi nahi bana), isliye id="" + ahash se
-dedupe cover karte hain.
+Why this matters: if the server is killed mid-run, its images stay on disk while the
+manifest is never written. That causes two problems on the next run:
+  * the next run takes seq = len(old_rows) and writes to nature-2001.jpg again
+    (the 585 already-saved files get overwritten)
+  * their ahash/ID are unknown, so visual duplicates get downloaded again
+The id/source are lost at that point (the manifest was never written), so rows are
+recovered with id="" and dedupe falls back to the ahash.
 """
 import csv, os, sys
 from PIL import Image
@@ -17,8 +17,8 @@ IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
 
 
 def ahash(img):
-    # EXACTLY tool ke ahash() jaisa (bina resample arg -> wahi default filter),
-    # warna hash match nahi karega aur cross-run dedupe kaam nahi karega.
+    # Must match the tool's ahash() EXACTLY (no resample argument -> same default
+    # filter), otherwise the hashes will not match and cross-run dedupe won't work.
     g = img.convert("L").resize((8, 8))
     px = list(g.getdata())
     avg = sum(px) / 64
@@ -34,7 +34,7 @@ def main():
     print(f"manifest={len(rows)}  disk={len(files)}  missing={len(missing)}")
 
     if not missing:
-        print("kuch missing nahi - repair ki zaroorat nahi")
+        print("nothing missing - no repair needed")
         return
 
     added = 0
@@ -45,7 +45,7 @@ def main():
                 w, h = im.size
                 hh = ahash(im)
         except Exception as e:
-            print(f"  skip {n}: {e}")
+            print(f"  skipped {n}: {e}")
             continue
         rows.append({
             "file": n, "resolution": f"{w}x{h}", "brightness_L": "",
@@ -55,7 +55,7 @@ def main():
         })
         added += 1
 
-    # fieldnames = UNION (purani rows me ahash ho bhi na ho)
+    # fieldnames = UNION of every key (older rows may not have an ahash column)
     fields = list(rows[0].keys())
     for r in rows[1:]:
         for k in r:

@@ -1,12 +1,12 @@
 @echo off
-title Pinterest Login (ek hi baar karna hai)
+title Pinterest Login (run once)
 cd /d "%~dp0"
 echo ============================================
-echo   Pinterest login - SIRF EK BAAR
-echo   Session .pin_profile me save ho jayega
+echo   Pinterest login - RUN ONCE ONLY
+echo   The session is saved into .pin_profile
 echo ============================================
 echo.
 python pin_home_feed.py --urls https://www.pinterest.com/ --wait-login 300
 echo.
-echo Agar "login detected" dikha to ho gaya! Band kar sakte ho.
+echo If it said "login detected" you are done - you can close this.
 pause

@@ -2,19 +2,19 @@
 Pinterest feed scraper (Playwright).
 
 Modes:
-  --allow-anon : public pages (bina login) -> home/explore/ideas/search
-  (default)    : login required -> asli personalized HOME FEED
+  --allow-anon : public pages (no login) -> home/explore/ideas/search
+  (default)    : login required -> your personalized HOME FEED
 
-Ek browser session me multiple URLs, har URL pe infinite-scroll.
-JSON stdout pe; logs stderr pe.
+Several URLs in one browser session, infinite-scroll on each URL.
+JSON on stdout; logs on stderr.
 
-Login karna ho:   python pin_home_feed.py --urls https://www.pinterest.com/
-                  (headed browser khulega, 150s me login kar lo, session save)
+To log in:        python pin_home_feed.py --urls https://www.pinterest.com/
+                  (opens a headed browser, log in within 150s, session saved)
 """
 import argparse, json, os, re, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PROFILE = os.path.join(HERE, ".pin_profile")   # login session yahan persist
+PROFILE = os.path.join(HERE, ".pin_profile")   # logged-in session persists here
 
 
 def log(m):
@@ -31,7 +31,7 @@ EXTRACT_JS = r"""
     seen.add(id);
     out.push({id: String(id), src: src, alt: (alt||'').slice(0,300), href: href||''});
   };
-  // 1) pin links -> id milta hai, landing ban sakta hai
+  // 1) pin links -> gives the id, so a landing URL can be built
   document.querySelectorAll('a[href*="/pin/"]').forEach(a => {
     const m = (a.getAttribute('href')||'').match(/\/pin\/(\d+)/);
     if (!m) return;
@@ -39,7 +39,7 @@ EXTRACT_JS = r"""
     const src = img ? (img.currentSrc || img.src || '') : '';
     push(m[1], src, img ? img.alt : '', a.href);
   });
-  // 2) bina link wale feed images
+  // 2) feed images that have no link
   document.querySelectorAll('img').forEach(img => {
     const src = img.currentSrc || img.src || '';
     if (!src.includes('pinimg.com')) return;
@@ -54,7 +54,7 @@ EXTRACT_JS = r"""
 LOGIN_JS = r"""
 () => {
   const txt = (document.body && document.body.innerText || '').slice(0, 5000);
-  // cookie check GALAT hai (anonymous ko bhi _pinterest_sess milti hai) -> UI + _auth
+  // the cookie check is WRONG (anonymous users also get _pinterest_sess) -> use UI + _auth
   const loginWall = /Join Pinterest for free|I already have an account|Create the life you love|Welcome to Pinterest|Log in to continue|Sign up to continue/i.test(txt);
   const imgs  = document.querySelectorAll('img[src*="pinimg.com"]').length;
   const pins  = document.querySelectorAll('a[href*="/pin/"]').length;
@@ -82,7 +82,7 @@ def is_logged_in(page, ctx=None):
 
 
 def upgrade(src):
-    """Size-variant URL -> originals (full res). Ladder save() khud try karta hai."""
+    """Size-variant URL -> originals (full res). save() tries the ladder itself."""
     m = re.search(r"i\.pinimg\.com/[^/]+/(.+)$", src.replace("\\/", "/"))
     if not m:
         return src, None
@@ -91,7 +91,7 @@ def upgrade(src):
 
 
 def scrape_url(page, url, scroll, out, seen):
-    """Ek URL pe scroll karke pins nikaalo (dedupe across urls via `seen`)."""
+    """Scroll one URL and collect its pins (deduped across URLs via `seen`)."""
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3200)
     before = len(out)
@@ -135,8 +135,8 @@ def main():
     ap.add_argument("--wait-login", type=int, default=150)
     ap.add_argument("--urls", nargs="+", default=["https://www.pinterest.com/"])
     ap.add_argument("--allow-anon", action="store_true",
-                    help="login chahiye nahi (public pages)")
-    ap.add_argument("--shot", default="", help="screenshot prefix (verify ke liye)")
+                    help="no login required (public pages)")
+    ap.add_argument("--shot", default="", help="screenshot prefix (for verification)")
     args = ap.parse_args()
 
     try:
@@ -175,7 +175,7 @@ def main():
             )
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
-            # saved session (chrome_pinterest_session.py se) inject karo
+            # inject the saved session (extracted by chrome_pinterest_session.py)
             sess_file = os.path.join(HERE, "pin_session.json")
             if os.path.exists(sess_file):
                 try:
@@ -190,11 +190,11 @@ def main():
             page.goto(args.urls[0], wait_until="domcontentloaded", timeout=60000)
             shot("load")
 
-            # ---- login (sirf tab jab allow-anon nahi) ----
+            # ---- login (only when --allow-anon is off) ----
             ok, st = is_logged_in(page, ctx)
             if not ok and not args.allow_anon:
-                log("LOGIN ZAROORI -> browser me Pinterest login kar lo "
-                    f"(wait {args.wait_login}s). Sirf pehli baar, session save.")
+                log("LOGIN REQUIRED -> please log in to Pinterest in the browser "
+                    f"(waiting {args.wait_login}s). First time only, session is saved.")
                 deadline = time.time() + args.wait_login
                 while time.time() < deadline:
                     time.sleep(3)
@@ -220,18 +220,18 @@ def main():
             if not ok and not args.allow_anon:
                 shot("nologin")
                 print(json.dumps({"error": "login_required",
-                                  "detail": ("Pinterest session nahi mila - headed "
-                                             "browser me login karo. state="
+                                  "detail": ("No Pinterest session found - log in "
+                                             "in the headed browser. state="
                                              + json.dumps(st)[:220])}))
                 return 3
 
-            # ---- har URL scrape ----
+            # ---- scrape every URL ----
             pins, seen = [], set()
             for u in args.urls:
                 log(f"=== {u} ===")
                 try:
                     n = scrape_url(page, u, args.scroll, pins, seen)
-                    log(f"  -> {n} naye")
+                    log(f"  -> {n} new")
                 except Exception as e:
                     log(f"  url failed: {e}")
 
